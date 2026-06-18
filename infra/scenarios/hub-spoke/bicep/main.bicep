@@ -246,6 +246,20 @@ resource firewall 'Microsoft.Network/azureFirewalls@2023-11-01' = {
 	}
 }
 
+// Bastion Public IP
+resource bastionPip 'Microsoft.Network/publicIPAddresses@2023-11-01' = {
+	name: '${take(namePrefix, 28)}-bastion-pip'
+	location: location
+	tags: tags
+	sku: {
+		name: 'Standard'
+		tier: 'Regional'
+	}
+	properties: {
+		publicIPAllocationMethod: 'Static'
+	}
+}
+
 // Azure Bastion（スケルトンのみ、実装は別途）
 resource bastion 'Microsoft.Network/bastionHosts@2023-11-01' = {
 	name: '${take(namePrefix, 35)}-bastion'
@@ -255,9 +269,19 @@ resource bastion 'Microsoft.Network/bastionHosts@2023-11-01' = {
 		name: 'Basic'
 	}
 	properties: {
-		virtualNetwork: {
-			id: hubVnet.id
-		}
+		ipConfigurations: [
+			{
+				name: 'IpConf'
+				properties: {
+					subnet: {
+						id: '${hubVnet.id}/subnets/AzureBastionSubnet'
+					}
+					publicIPAddress: {
+						id: bastionPip.id
+					}
+				}
+			}
+		]
 		disableCopyPaste: false
 		enableTunneling: false
 	}
@@ -406,7 +430,7 @@ resource spokeToHubPeerings 'Microsoft.Network/virtualNetworks/virtualNetworkPee
 		}
 		allowVirtualNetworkAccess: true
 		allowForwardedTraffic: true
-		useRemoteGateways: true
+		useRemoteGateways: false
 	}
 }]
 
