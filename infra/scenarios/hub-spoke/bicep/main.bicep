@@ -12,6 +12,10 @@ param spokeCount int = 2
 @description('Firewall の内部 IP アドレス')
 param firewallPrivateIp string = '10.10.0.4'
 
+@secure()
+@description('VM 管理者パスワード')
+param vmAdminPassword string = 'P@ssw0rd1234!Azure'
+
 var namePrefix = toLower('${scenarioCode}-${uniqueString(resourceGroup().id)}')
 var tags = {
 	scenario: 'hub-spoke'
@@ -84,7 +88,7 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
 				}
 			}
 			{
-				name: 'allow-rdp-ssh-outbound'
+				name: 'allow-ssh-from-bastion'
 				properties: {
 					access: 'Allow'
 					direction: 'Outbound'
@@ -93,7 +97,59 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
 					sourceAddressPrefix: '*'
 					sourcePortRange: '*'
 					destinationAddressPrefix: 'VirtualNetwork'
-					destinationPortRange: '22,3389'
+					destinationPortRange: '22'
+				}
+			}
+			{
+				name: 'allow-rdp-from-bastion'
+				properties: {
+					access: 'Allow'
+					direction: 'Outbound'
+					priority: 110
+					protocol: 'Tcp'
+					sourceAddressPrefix: '*'
+					sourcePortRange: '*'
+					destinationAddressPrefix: 'VirtualNetwork'
+					destinationPortRange: '3389'
+				}
+			}
+			{
+				name: 'allow-load-balancer-inbound'
+				properties: {
+					access: 'Allow'
+					direction: 'Inbound'
+					priority: 120
+					protocol: 'Tcp'
+					sourceAddressPrefix: 'AzureLoadBalancer'
+					sourcePortRange: '*'
+					destinationAddressPrefix: '*'
+					destinationPortRange: '443'
+				}
+			}
+			{
+				name: 'allow-gateway-manager-outbound'
+				properties: {
+					access: 'Allow'
+					direction: 'Outbound'
+					priority: 200
+					protocol: 'Tcp'
+					sourceAddressPrefix: '*'
+					sourcePortRange: '*'
+					destinationAddressPrefix: 'GatewayManager'
+					destinationPortRange: '443'
+				}
+			}
+			{
+				name: 'allow-azure-cloud-outbound'
+				properties: {
+					access: 'Allow'
+					direction: 'Outbound'
+					priority: 210
+					protocol: 'Tcp'
+					sourceAddressPrefix: '*'
+					sourcePortRange: '*'
+					destinationAddressPrefix: 'AzureCloud'
+					destinationPortRange: '443'
 				}
 			}
 		]
@@ -427,11 +483,12 @@ resource winVms 'Microsoft.Compute/virtualMachines@2023-07-01' = [for (config, i
 	}
 	properties: {
 		hardwareProfile: {
-			vmSize: 'Standard_B2s'
+			vmSize: 'Standard_D2s_v3'
 		}
 		osProfile: {
 			computerName: 'spoke${config.spokeNum}win'
 			adminUsername: 'azureuser'
+			adminPassword: vmAdminPassword
 			windowsConfiguration: {
 				enableAutomaticUpdates: true
 				timeZone: 'Tokyo Standard Time'
@@ -472,11 +529,12 @@ resource lnxVms 'Microsoft.Compute/virtualMachines@2023-07-01' = [for (config, i
 	}
 	properties: {
 		hardwareProfile: {
-			vmSize: 'Standard_B2s'
+			vmSize: 'Standard_D2s_v3'
 		}
 		osProfile: {
 			computerName: 'spoke${config.spokeNum}lnx'
 			adminUsername: 'azureuser'
+			adminPassword: vmAdminPassword
 			linuxConfiguration: {
 				disablePasswordAuthentication: false
 			}
