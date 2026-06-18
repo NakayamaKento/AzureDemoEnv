@@ -1,0 +1,142 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.18.4.5664",
+      "templateHash": "217426512507168937"
+    }
+  },
+  "parameters": {
+    "scenarioCode": {
+      "type": "string",
+      "defaultValue": "csa01",
+      "metadata": {
+        "description": "生成される名前に使用するシナリオコード"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "southwestasia",
+      "metadata": {
+        "description": "主デプロイリージョン"
+      }
+    }
+  },
+  "variables": {
+    "namePrefix": "[toLower(format('{0}-{1}', parameters('scenarioCode'), uniqueString(resourceGroup().id)))]",
+    "tags": {
+      "scenario": "vnet-peering-governance",
+      "managedBy": "AzureDemoEnv"
+    },
+    "leftTags": "[union(variables('tags'), createObject('governanceDomain', 'left'))]",
+    "rightTags": "[union(variables('tags'), createObject('governanceDomain', 'right'))]",
+    "leftVnetName": "[format('{0}-left-vnet', take(variables('namePrefix'), 40))]",
+    "rightVnetName": "[format('{0}-right-vnet', take(variables('namePrefix'), 39))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('leftVnetName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('leftTags')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.30.0.0/16"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "left-app",
+            "properties": {
+              "addressPrefix": "10.30.1.0/24"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('rightVnetName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('rightTags')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.40.0.0/16"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "right-app",
+            "properties": {
+              "addressPrefix": "10.40.1.0/24"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('leftVnetName'), 'to-right')]",
+      "properties": {
+        "remoteVirtualNetwork": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('rightVnetName'))]"
+        },
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('leftVnetName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('rightVnetName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('rightVnetName'), 'to-left')]",
+      "properties": {
+        "remoteVirtualNetwork": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('leftVnetName'))]"
+        },
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('leftVnetName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('rightVnetName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "scenario": {
+      "type": "string",
+      "value": "vnet-peering-governance"
+    },
+    "resourcePrefix": {
+      "type": "string",
+      "value": "[variables('namePrefix')]"
+    },
+    "selectedLocation": {
+      "type": "string",
+      "value": "[parameters('location')]"
+    },
+    "leftVnetResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/virtualNetworks', variables('leftVnetName'))]"
+    },
+    "rightVnetResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/virtualNetworks', variables('rightVnetName'))]"
+    },
+    "governanceNote": {
+      "type": "string",
+      "value": "ポリシー適用は subscription スコープで別デプロイとして運用します。"
+    }
+  }
+}

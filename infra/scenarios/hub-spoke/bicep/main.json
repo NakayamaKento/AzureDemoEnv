@@ -1,0 +1,633 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.18.4.5664",
+      "templateHash": "13509499682022700723"
+    }
+  },
+  "parameters": {
+    "scenarioCode": {
+      "type": "string",
+      "defaultValue": "csa01",
+      "metadata": {
+        "description": "生成される名前に使用するシナリオコード"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "southwestasia",
+      "metadata": {
+        "description": "主デプロイリージョン"
+      }
+    },
+    "spokeCount": {
+      "type": "int",
+      "defaultValue": 2,
+      "metadata": {
+        "description": "スポーク VNet の数（1-4）"
+      }
+    },
+    "firewallPrivateIp": {
+      "type": "string",
+      "defaultValue": "10.10.0.4",
+      "metadata": {
+        "description": "Firewall の内部 IP アドレス"
+      }
+    }
+  },
+  "variables": {
+    "copy": [
+      {
+        "name": "spokeConfigs",
+        "count": "[length(range(0, parameters('spokeCount')))]",
+        "input": {
+          "index": "[range(0, parameters('spokeCount'))[copyIndex('spokeConfigs')]]",
+          "spokeNum": "[add(range(0, parameters('spokeCount'))[copyIndex('spokeConfigs')], 1)]",
+          "vnetName": "[format('{0}-spoke-{1}-vnet', take(variables('namePrefix'), 33), add(range(0, parameters('spokeCount'))[copyIndex('spokeConfigs')], 1))]",
+          "vnetPrefix": "[format('10.{0}.0.0/16', add(20, range(0, parameters('spokeCount'))[copyIndex('spokeConfigs')]))]",
+          "vmSubnetPrefix": "[format('10.{0}.1.0/24', add(20, range(0, parameters('spokeCount'))[copyIndex('spokeConfigs')]))]",
+          "peSubnetPrefix": "[format('10.{0}.2.0/24', add(20, range(0, parameters('spokeCount'))[copyIndex('spokeConfigs')]))]",
+          "udrName": "[format('{0}-spoke-{1}-udr', take(variables('namePrefix'), 32), add(range(0, parameters('spokeCount'))[copyIndex('spokeConfigs')], 1))]",
+          "nsgName": "[format('{0}-spoke-{1}-nsg', take(variables('namePrefix'), 31), add(range(0, parameters('spokeCount'))[copyIndex('spokeConfigs')], 1))]"
+        }
+      }
+    ],
+    "namePrefix": "[toLower(format('{0}-{1}', parameters('scenarioCode'), uniqueString(resourceGroup().id)))]",
+    "tags": {
+      "scenario": "hub-spoke",
+      "managedBy": "AzureDemoEnv"
+    },
+    "hubVnetName": "[format('{0}-hub-vnet', take(variables('namePrefix'), 36))]",
+    "hubNsgName": "[format('{0}-hub-nsg', take(variables('namePrefix'), 35))]",
+    "bastionNsgName": "[format('{0}-bastion-nsg', take(variables('namePrefix'), 32))]",
+    "firewallName": "[format('{0}-fw', take(variables('namePrefix'), 34))]",
+    "firewallPipName": "[format('{0}-fw-pip', take(variables('namePrefix'), 27))]",
+    "windowsVmSku": {
+      "publisher": "MicrosoftWindowsServer",
+      "offer": "WindowsServer",
+      "sku": "2022-datacenter-azure-edition-smalldisk",
+      "version": "latest"
+    },
+    "linuxVmSku": {
+      "publisher": "Canonical",
+      "offer": "0001-com-ubuntu-server-focal",
+      "sku": "20_04-lts-gen2",
+      "version": "latest"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('hubNsgName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "allow-vnet-inbound",
+            "properties": {
+              "access": "Allow",
+              "direction": "Inbound",
+              "priority": 100,
+              "protocol": "*",
+              "sourceAddressPrefix": "VirtualNetwork",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "*"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('bastionNsgName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "allow-https-inbound",
+            "properties": {
+              "access": "Allow",
+              "direction": "Inbound",
+              "priority": 100,
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "443"
+            }
+          },
+          {
+            "name": "allow-gateway-manager",
+            "properties": {
+              "access": "Allow",
+              "direction": "Inbound",
+              "priority": 110,
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "GatewayManager",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "443"
+            }
+          },
+          {
+            "name": "allow-rdp-ssh-outbound",
+            "properties": {
+              "access": "Allow",
+              "direction": "Outbound",
+              "priority": 100,
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "VirtualNetwork",
+              "destinationPortRange": "22,3389"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('firewallPipName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "sku": {
+        "name": "Standard",
+        "tier": "Regional"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static"
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('hubVnetName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.10.0.0/16"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "AzureFirewallSubnet",
+            "properties": {
+              "addressPrefix": "10.10.0.0/26"
+            }
+          },
+          {
+            "name": "AzureBastionSubnet",
+            "properties": {
+              "addressPrefix": "10.10.1.0/27",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('bastionNsgName'))]"
+              }
+            }
+          },
+          {
+            "name": "GatewaySubnet",
+            "properties": {
+              "addressPrefix": "10.10.1.32/27"
+            }
+          },
+          {
+            "name": "hub-app",
+            "properties": {
+              "addressPrefix": "10.10.2.0/24",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('hubNsgName'))]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('bastionNsgName'))]",
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('hubNsgName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/azureFirewalls",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('firewallName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "sku": {
+          "name": "AZFW_VNet",
+          "tier": "Standard"
+        },
+        "threatIntelMode": "Alert",
+        "ipConfigurations": [
+          {
+            "name": "firewall-config",
+            "properties": {
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('firewallPipName'))]"
+              },
+              "subnet": {
+                "id": "[format('{0}/subnets/AzureFirewallSubnet', resourceId('Microsoft.Network/virtualNetworks', variables('hubVnetName')))]"
+              }
+            }
+          }
+        ],
+        "networkRuleCollections": [],
+        "applicationRuleCollections": [],
+        "natRuleCollections": []
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('firewallPipName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnetName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/bastionHosts",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}-bastion', take(variables('namePrefix'), 35))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "sku": {
+        "name": "Basic"
+      },
+      "properties": {
+        "virtualNetwork": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnetName'))]"
+        },
+        "disableCopyPaste": false,
+        "enableTunneling": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnetName'))]"
+      ]
+    },
+    {
+      "copy": {
+        "name": "spokeNsgs",
+        "count": "[length(variables('spokeConfigs'))]"
+      },
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('spokeConfigs')[copyIndex()].nsgName]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "allow-vnet-inbound",
+            "properties": {
+              "access": "Allow",
+              "direction": "Inbound",
+              "priority": 100,
+              "protocol": "*",
+              "sourceAddressPrefix": "VirtualNetwork",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "*"
+            }
+          },
+          {
+            "name": "allow-rdp-from-bastion",
+            "properties": {
+              "access": "Allow",
+              "direction": "Inbound",
+              "priority": 110,
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "10.10.1.0/27",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "3389"
+            }
+          },
+          {
+            "name": "allow-ssh-from-bastion",
+            "properties": {
+              "access": "Allow",
+              "direction": "Inbound",
+              "priority": 120,
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "10.10.1.0/27",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "22"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "copy": {
+        "name": "spokeUdrs",
+        "count": "[length(variables('spokeConfigs'))]"
+      },
+      "type": "Microsoft.Network/routeTables",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('spokeConfigs')[copyIndex()].udrName]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "routes": [
+          {
+            "name": "to-firewall",
+            "properties": {
+              "addressPrefix": "0.0.0.0/0",
+              "nextHopType": "VirtualAppliance",
+              "nextHopIpAddress": "[parameters('firewallPrivateIp')]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "copy": {
+        "name": "spokeVnets",
+        "count": "[length(variables('spokeConfigs'))]"
+      },
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('spokeConfigs')[copyIndex()].vnetName]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('spokeConfigs')[copyIndex()].vnetPrefix]"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "spoke-vm",
+            "properties": {
+              "addressPrefix": "[variables('spokeConfigs')[copyIndex()].vmSubnetPrefix]",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('spokeConfigs')[copyIndex()].nsgName)]"
+              },
+              "routeTable": {
+                "id": "[resourceId('Microsoft.Network/routeTables', variables('spokeConfigs')[copyIndex()].udrName)]"
+              }
+            }
+          },
+          {
+            "name": "spoke-pe",
+            "properties": {
+              "addressPrefix": "[variables('spokeConfigs')[copyIndex()].peSubnetPrefix]",
+              "routeTable": {
+                "id": "[resourceId('Microsoft.Network/routeTables', variables('spokeConfigs')[copyIndex()].udrName)]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('spokeConfigs')[copyIndex()].nsgName)]",
+        "[resourceId('Microsoft.Network/routeTables', variables('spokeConfigs')[copyIndex()].udrName)]",
+        "[resourceId('Microsoft.Network/routeTables', variables('spokeConfigs')[copyIndex()].udrName)]"
+      ]
+    },
+    {
+      "copy": {
+        "name": "hubToSpokePeerings",
+        "count": "[length(variables('spokeConfigs'))]"
+      },
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('hubVnetName'), format('to-spoke-{0}', variables('spokeConfigs')[copyIndex()].spokeNum))]",
+      "properties": {
+        "remoteVirtualNetwork": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('spokeConfigs')[copyIndex()].vnetName)]"
+        },
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true,
+        "allowGatewayTransit": true
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnetName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('spokeConfigs')[copyIndex()].vnetName)]"
+      ]
+    },
+    {
+      "copy": {
+        "name": "spokeToHubPeerings",
+        "count": "[length(variables('spokeConfigs'))]"
+      },
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('spokeConfigs')[copyIndex()].vnetName, 'to-hub')]",
+      "properties": {
+        "remoteVirtualNetwork": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnetName'))]"
+        },
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true,
+        "useRemoteGateways": true
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnetName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('spokeConfigs')[copyIndex()].vnetName)]"
+      ]
+    },
+    {
+      "copy": {
+        "name": "winVmNics",
+        "count": "[length(variables('spokeConfigs'))]"
+      },
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}-spoke{1}-win-nic', take(variables('namePrefix'), 27), variables('spokeConfigs')[copyIndex()].spokeNum)]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[format('{0}/subnets/spoke-vm', resourceId('Microsoft.Network/virtualNetworks', variables('spokeConfigs')[copyIndex()].vnetName))]"
+              },
+              "privateIPAllocationMethod": "Dynamic"
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "spokeVnets"
+      ]
+    },
+    {
+      "copy": {
+        "name": "lnxVmNics",
+        "count": "[length(variables('spokeConfigs'))]"
+      },
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}-spoke{1}-lnx-nic', take(variables('namePrefix'), 27), variables('spokeConfigs')[copyIndex()].spokeNum)]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[format('{0}/subnets/spoke-vm', resourceId('Microsoft.Network/virtualNetworks', variables('spokeConfigs')[copyIndex()].vnetName))]"
+              },
+              "privateIPAllocationMethod": "Dynamic"
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "spokeVnets"
+      ]
+    },
+    {
+      "copy": {
+        "name": "winVms",
+        "count": "[length(variables('spokeConfigs'))]"
+      },
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}-spoke{1}-win', take(variables('namePrefix'), 28), variables('spokeConfigs')[copyIndex()].spokeNum)]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "Standard_B2s"
+        },
+        "osProfile": {
+          "computerName": "[format('spoke{0}win', variables('spokeConfigs')[copyIndex()].spokeNum)]",
+          "adminUsername": "azureuser",
+          "windowsConfiguration": {
+            "enableAutomaticUpdates": true,
+            "timeZone": "Tokyo Standard Time"
+          }
+        },
+        "storageProfile": {
+          "imageReference": "[variables('windowsVmSku')]",
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "Premium_LRS"
+            }
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', format('{0}-spoke{1}-win-nic', take(variables('namePrefix'), 27), variables('spokeConfigs')[copyIndex()].spokeNum))]",
+              "properties": {
+                "primary": true
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "winVmNics"
+      ]
+    },
+    {
+      "copy": {
+        "name": "lnxVms",
+        "count": "[length(variables('spokeConfigs'))]"
+      },
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}-spoke{1}-lnx', take(variables('namePrefix'), 28), variables('spokeConfigs')[copyIndex()].spokeNum)]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "Standard_B2s"
+        },
+        "osProfile": {
+          "computerName": "[format('spoke{0}lnx', variables('spokeConfigs')[copyIndex()].spokeNum)]",
+          "adminUsername": "azureuser",
+          "linuxConfiguration": {
+            "disablePasswordAuthentication": false
+          }
+        },
+        "storageProfile": {
+          "imageReference": "[variables('linuxVmSku')]",
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "Premium_LRS"
+            }
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', format('{0}-spoke{1}-lnx-nic', take(variables('namePrefix'), 27), variables('spokeConfigs')[copyIndex()].spokeNum))]",
+              "properties": {
+                "primary": true
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "lnxVmNics"
+      ]
+    }
+  ],
+  "outputs": {
+    "scenario": {
+      "type": "string",
+      "value": "hub-spoke"
+    },
+    "resourcePrefix": {
+      "type": "string",
+      "value": "[variables('namePrefix')]"
+    },
+    "selectedLocation": {
+      "type": "string",
+      "value": "[parameters('location')]"
+    },
+    "spokeCount": {
+      "type": "int",
+      "value": "[parameters('spokeCount')]"
+    },
+    "hubVnetResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnetName'))]"
+    },
+    "hubVnetName": {
+      "type": "string",
+      "value": "[variables('hubVnetName')]"
+    },
+    "firewallName": {
+      "type": "string",
+      "value": "[variables('firewallName')]"
+    },
+    "firewallPrivateIp": {
+      "type": "string",
+      "value": "[parameters('firewallPrivateIp')]"
+    },
+    "bastionName": {
+      "type": "string",
+      "value": "[format('{0}-bastion', take(variables('namePrefix'), 35))]"
+    },
+    "vmDeploymentNote": {
+      "type": "string",
+      "value": "[format('Windows VM (×{0}) + Linux VM (×{1}) deployed in spoke subnets', parameters('spokeCount'), parameters('spokeCount'))]"
+    }
+  }
+}

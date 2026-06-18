@@ -59,7 +59,8 @@ resource rightVnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
 }
 
 resource leftToRightPeering 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2023-11-01' = {
-	name: '${leftVnetName}/to-right'
+	parent: leftVnet
+	name: 'to-right'
 	properties: {
 		remoteVirtualNetwork: {
 			id: rightVnet.id
@@ -70,7 +71,8 @@ resource leftToRightPeering 'Microsoft.Network/virtualNetworks/virtualNetworkPee
 }
 
 resource rightToLeftPeering 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2023-11-01' = {
-	name: '${rightVnetName}/to-left'
+	parent: rightVnet
+	name: 'to-left'
 	properties: {
 		remoteVirtualNetwork: {
 			id: leftVnet.id

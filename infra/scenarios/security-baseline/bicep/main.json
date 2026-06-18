@@ -1,0 +1,166 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.18.4.5664",
+      "templateHash": "11596061983953706229"
+    }
+  },
+  "parameters": {
+    "scenarioCode": {
+      "type": "string",
+      "defaultValue": "csa01",
+      "metadata": {
+        "description": "生成される名前に使用するシナリオコード"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "southwestasia",
+      "metadata": {
+        "description": "主デプロイリージョン"
+      }
+    }
+  },
+  "variables": {
+    "namePrefix": "[toLower(format('{0}-{1}', parameters('scenarioCode'), uniqueString(resourceGroup().id)))]",
+    "tags": {
+      "scenario": "security-baseline",
+      "managedBy": "AzureDemoEnv"
+    },
+    "baselineNsgName": "[format('{0}-baseline-nsg', take(variables('namePrefix'), 35))]",
+    "baselineRtName": "[format('{0}-baseline-rt', take(variables('namePrefix'), 37))]",
+    "baselineVnetName": "[format('{0}-baseline-vnet', take(variables('namePrefix'), 36))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('baselineNsgName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "deny-inbound-rdp",
+            "properties": {
+              "access": "Deny",
+              "direction": "Inbound",
+              "priority": 200,
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "3389"
+            }
+          },
+          {
+            "name": "deny-inbound-ssh",
+            "properties": {
+              "access": "Deny",
+              "direction": "Inbound",
+              "priority": 210,
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "22"
+            }
+          },
+          {
+            "name": "allow-vnet-inbound",
+            "properties": {
+              "access": "Allow",
+              "direction": "Inbound",
+              "priority": 300,
+              "protocol": "*",
+              "sourceAddressPrefix": "VirtualNetwork",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "*"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/routeTables",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('baselineRtName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "routes": [
+          {
+            "name": "default-egress",
+            "properties": {
+              "addressPrefix": "0.0.0.0/0",
+              "nextHopType": "VirtualAppliance",
+              "nextHopIpAddress": "10.50.0.4"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('baselineVnetName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.50.0.0/16"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "secure-app",
+            "properties": {
+              "addressPrefix": "10.50.1.0/24",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('baselineNsgName'))]"
+              },
+              "routeTable": {
+                "id": "[resourceId('Microsoft.Network/routeTables', variables('baselineRtName'))]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('baselineNsgName'))]",
+        "[resourceId('Microsoft.Network/routeTables', variables('baselineRtName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "scenario": {
+      "type": "string",
+      "value": "security-baseline"
+    },
+    "resourcePrefix": {
+      "type": "string",
+      "value": "[variables('namePrefix')]"
+    },
+    "selectedLocation": {
+      "type": "string",
+      "value": "[parameters('location')]"
+    },
+    "baselineNsgResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('baselineNsgName'))]"
+    },
+    "baselineRouteTableResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/routeTables', variables('baselineRtName'))]"
+    },
+    "baselineVnetResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/virtualNetworks', variables('baselineVnetName'))]"
+    }
+  }
+}
