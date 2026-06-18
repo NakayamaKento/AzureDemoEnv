@@ -1,0 +1,23 @@
+# OS
+Thumbs.db
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+**/*.tfstate
+**/*.tfstate.*
+
+# Bicep/ARM build artifacts
+**/*.json.tmp
+
+# Logs
+*.log
+
+# Local request drafts (keep template only)
+requests/local/*.yaml
+!requests/local/scenario-request.template.yaml

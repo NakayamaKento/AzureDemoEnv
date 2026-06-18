@@ -1,0 +1,19 @@
+name: docs-sync-check
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - 'docs/**'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ドキュメント存在チェック
+        run: |
+          test -f docs/operations/scenario-intake-and-standards.md
+          test -f docs/operations/module-refactor-policy.md
+          echo "docs check passed"

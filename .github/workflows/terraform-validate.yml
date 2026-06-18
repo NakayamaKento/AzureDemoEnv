@@ -1,0 +1,27 @@
+name: terraform-validate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '**/*.tf'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Terraform セットアップ
+        uses: hashicorp/setup-terraform@v3
+      - name: Terraform 検証
+        run: |
+          dirs=$(find . -name "*.tf" -exec dirname {} \; | sort -u)
+          if [ -z "$dirs" ]; then
+            echo "No terraform files"
+            exit 0
+          fi
+          for d in $dirs; do
+            echo "Validating $d"
+            terraform -chdir="$d" init -backend=false
+            terraform -chdir="$d" validate
+          done

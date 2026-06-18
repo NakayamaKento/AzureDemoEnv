@@ -1,0 +1,52 @@
+name: avm-version-review
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_updates:
+        description: bicep ファイルを自動更新して PR を作成する
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: AVM バージョン確認
+        shell: pwsh
+        run: |
+          $apply = '${{ github.event.inputs.apply_updates }}'
+          if ($apply -eq 'true') {
+            ./infra/scripts/review-avm-versions.ps1 -Apply
+          }
+          else {
+            ./infra/scripts/review-avm-versions.ps1
+          }
+
+      - name: レポートを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avm-version-review-report
+          path: docs/operations/avm-version-review.md
+
+      - name: 更新がある場合 PR を作成
+        if: ${{ github.event.inputs.apply_updates == 'true' }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: AVM バージョンを最新化"
+          title: "chore: AVM バージョンを最新化"
+          body: |
+            定期見直しワークフローにより、AVM 参照バージョンを最新化しました。
+            変更内容は docs/operations/avm-version-review.md を確認してください。
+          branch: chore/avm-version-refresh
+          delete-branch: true

@@ -1,0 +1,41 @@
+name: issue-auto-label
+
+on:
+  issues:
+    types:
+      - opened
+      - edited
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 依頼種別からラベルを自動付与
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const body = issue.body || '';
+            const labels = [];
+
+            if (/standard/i.test(body)) {
+              labels.push('standard');
+            }
+            if (/adhoc/i.test(body)) {
+              labels.push('adhoc');
+            }
+
+            if (labels.length === 0) {
+              core.info('request_type を本文から判定できなかったためスキップ');
+              return;
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              labels
+            });

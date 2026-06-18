@@ -1,0 +1,65 @@
+name: シナリオ依頼
+description: 新規または更新の Azure IaC シナリオを依頼します
+title: "scenario: <短い説明>"
+labels:
+  - scenario
+body:
+  - type: dropdown
+    id: request_type
+    attributes:
+      label: 依頼種別
+      options:
+        - standard
+        - adhoc
+    validations:
+      required: true
+
+  - type: input
+    id: scenario_code
+    attributes:
+      label: シナリオコード
+      description: リソース命名のプレフィックス/サフィックスに使う短いコード（例: csa01）
+      placeholder: csa01
+    validations:
+      required: true
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: 目的
+      description: このシナリオで何を実証したいかを記載してください
+    validations:
+      required: true
+
+  - type: textarea
+    id: required_resources
+    attributes:
+      label: 必要なリソース
+      description: サブスクリプション跨ぎ要件がある場合は必ず記載してください
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Azure リージョン
+      description: 任意。既定値は southwestasia です
+      placeholder: southwestasia
+    validations:
+      required: false
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 制約条件
+      description: セキュリティ、コスト、性能、ガバナンス要件を記載してください
+    validations:
+      required: false
+
+  - type: textarea
+    id: done_definition
+    attributes:
+      label: 完了条件
+      description: 検証条件とドキュメント要件を記載してください
+    validations:
+      required: true

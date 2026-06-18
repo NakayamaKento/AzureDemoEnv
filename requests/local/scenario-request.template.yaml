@@ -1,0 +1,21 @@
+requestType: standard # standard | adhoc
+scenarioCode: csa01
+objective: >-
+  このシナリオで実証したい内容を記載してください。
+requiredResources:
+  - type: Microsoft.Network/virtualNetworks
+    notes: 必要に応じて hub または spoke を指定
+crossSubscription:
+  enabled: false
+  subscriptions: []
+location: southwestasia
+constraints:
+  security: []
+  cost: []
+  performance: []
+  governance: []
+doneDefinition:
+  - bicep build が成功する
+  - terraform がある場合は terraform validate が成功する
+  - mermaid 図が生成される
+  - シナリオ README が作成される
