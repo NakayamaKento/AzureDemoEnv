@@ -9,18 +9,18 @@ param location string = 'southwestasia'
 @description('スポーク VNet の数（1-4）')
 param spokeCount int = 2
 
-@description('Firewall の内部 IP アドレス')
-param firewallPrivateIp string = '10.10.0.4'
-
 @secure()
-@description('VM 管理者パスワード')
-param vmAdminPassword string = 'P@ssw0rd1234!Azure'
+@description('VM 管理者パスワード（デプロイ時に指定してください）')
+param vmAdminPassword string
 
 var namePrefix = toLower('${scenarioCode}-${uniqueString(resourceGroup().id)}')
 var tags = {
 	scenario: 'hub-spoke'
 	managedBy: 'AzureDemoEnv'
 }
+
+// Firewall のプライベート IP アドレス（AzureFirewallSubnet 内で自動割り当て）
+var firewallPrivateIp = '10.10.0.4'
 
 // ============ Hub VNet ============
 
@@ -597,6 +597,5 @@ output spokeCount int = spokeCount
 output hubVnetResourceId string = hubVnet.id
 output hubVnetName string = hubVnetName
 output firewallName string = firewallName
-output firewallPrivateIp string = firewallPrivateIp
 output bastionName string = bastion.name
 output vmDeploymentNote string = 'Windows VM (×${spokeCount}) + Linux VM (×${spokeCount}) deployed in spoke subnets'
