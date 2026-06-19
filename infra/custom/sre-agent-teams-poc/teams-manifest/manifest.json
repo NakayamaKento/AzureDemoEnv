@@ -1,0 +1,64 @@
+{
+  "validDomains": [
+    "func-sre-poc-5q7evl3h.azurewebsites.net"
+  ],
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "bots": [
+    {
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "commands": [
+            {
+              "description": "Show usage",
+              "title": "help"
+            },
+            {
+              "description": "Check SRE Agent status",
+              "title": "status"
+            }
+          ],
+          "scopes": [
+            "personal",
+            "team",
+            "groupchat"
+          ]
+        }
+      ],
+      "botId": "a313715f-e932-42ef-ae03-a73093594b3a",
+      "supportsFiles": false,
+      "scopes": [
+        "personal",
+        "team",
+        "groupchat"
+      ]
+    }
+  ],
+  "accentColor": "#0078D4",
+  "packageName": "com.sreagent.teams.poc",
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "version": "1.0.1",
+  "manifestVersion": "1.16",
+  "name": {
+    "full": "Azure SRE Agent Teams Bot (POC)",
+    "short": "SRE Agent Bot"
+  },
+  "id": "a313715f-e932-42ef-ae03-a73093594b3a",
+  "description": {
+    "full": "Bidirectional real-time conversation with Azure SRE Agent via Microsoft Teams.",
+    "short": "Chat with Azure SRE Agent from Teams"
+  },
+  "developer": {
+    "privacyUrl": "https://privacy.microsoft.com/privacystatement",
+    "name": "Azure Demo",
+    "termsOfUseUrl": "https://www.microsoft.com/en-us/legal/intellectualproperty/copyright",
+    "websiteUrl": "https://azure.microsoft.com"
+  },
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json"
+}

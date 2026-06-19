@@ -1,0 +1,22 @@
+{
+  "name": "sre-agent-teams-bot",
+  "version": "1.0.0",
+  "description": "Azure SRE Agent × Teams 双方向会話ボット（POC）",
+  "main": "src/functions/*.js",
+  "scripts": {
+    "start": "func start",
+    "start:aca": "node src/server.js",
+    "test": "echo \"No tests\" && exit 0"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.5.0",
+    "@azure/identity": "^4.4.0",
+    "@azure/data-tables": "^13.2.2",
+    "botbuilder": "^4.23.1",
+    "botframework-connector": "^4.23.1",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
