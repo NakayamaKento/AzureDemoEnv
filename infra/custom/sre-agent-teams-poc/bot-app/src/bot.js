@@ -68,7 +68,7 @@ class TeamsBot extends ActivityHandler {
       );
 
       // (d) SRE Agent へ非同期送信 → ポーリング → プロアクティブ返信
-      this._processWithSreAgent(threadId, userText, conversationRef).catch((err) => {
+      this._processWithSreAgent(threadId, userText, conversationRef, conversationId).catch((err) => {
         console.error('[_processWithSreAgent]', err);
       });
 
@@ -97,19 +97,36 @@ class TeamsBot extends ActivityHandler {
    * @param {string} threadId
    * @param {string} userText
    * @param {import('botbuilder').ConversationReference} conversationRef
+   * @param {string} conversationId
    */
-  async _processWithSreAgent(threadId, userText, conversationRef) {
+  async _processWithSreAgent(threadId, userText, conversationRef, conversationId) {
     let agentResponse;
+    let currentThreadId = threadId;
     try {
       // SRE Agent へメッセージ送信
-      const beforeCount = await this.sreClient.getMessageCount(threadId);
-      await this.sreClient.sendMessage(threadId, userText);
+      const beforeCount = await this.sreClient.getMessageCount(currentThreadId);
+      await this.sreClient.sendMessage(currentThreadId, userText);
 
       // 応答ポーリング（最大 120 秒、3 秒間隔）
-      agentResponse = await this.sreClient.pollForResponse(threadId, beforeCount, 120_000);
+      agentResponse = await this.sreClient.pollForResponse(currentThreadId, beforeCount, 120_000);
     } catch (err) {
-      console.error('[sreAgent]', err);
-      agentResponse = `⚠️ SRE Agent からの応答取得に失敗しました: ${err.message}`;
+      // 404 = SRE Agent 側にスレッドが存在しない → スレッドを新規作成してリトライ
+      if (err.message.includes('404') && conversationId) {
+        console.log(`[sreAgent] Thread ${currentThreadId} not found. Creating new thread...`);
+        try {
+          // POST /api/v1/threads に StartMessage を含めてスレッド作成＋初回送信を同時実行
+          currentThreadId = await this.sreClient.createThread(userText);
+          await this.threadStore.saveThread(conversationId, currentThreadId);
+          // createThread でメッセージ送信済み → beforeCount=1 でポーリング開始
+          agentResponse = await this.sreClient.pollForResponse(currentThreadId, 1, 120_000);
+        } catch (retryErr) {
+          console.error('[sreAgent] retry failed:', retryErr);
+          agentResponse = `⚠️ SRE Agent からの応答取得に失敗しました: ${retryErr.message}`;
+        }
+      } else {
+        console.error('[sreAgent]', err);
+        agentResponse = `⚠️ SRE Agent からの応答取得に失敗しました: ${err.message}`;
+      }
     }
 
     // プロアクティブメッセージで Teams に返信

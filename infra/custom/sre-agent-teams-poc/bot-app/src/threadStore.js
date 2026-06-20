@@ -65,6 +65,22 @@ class ThreadStore {
     }
   }
 
+  /**
+   * conversationId に紐づくスレッド ID を上書き保存する（SRE Agent 生成 ID で置換する場合に使用）
+   * @param {string} conversationId
+   * @param {string} threadId
+   */
+  async saveThread(conversationId, threadId) {
+    const safeKey = conversationId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 200);
+    await this.client.upsertEntity({
+      partitionKey: PARTITION_KEY,
+      rowKey: safeKey,
+      sreThreadId: threadId,
+      createdAt: new Date().toISOString()
+    });
+    console.log(`[threadStore] saveThread: ${safeKey} -> ${threadId}`);
+  }
+
   _normalizeThreadId(threadId) {
     const value = String(threadId ?? '').trim();
     if (!value) {

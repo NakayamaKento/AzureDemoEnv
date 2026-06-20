@@ -54,6 +54,29 @@ class SreAgentClient {
   }
 
   /**
+   * SRE Agent 側にスレッドを新規作成し、生成されたスレッド ID を返す
+   * @returns {Promise<string>} threadId
+   */
+  async createThread(startMessage) {
+    const data = await this._fetch('/api/v1/threads', {
+      method: 'POST',
+      body: JSON.stringify({
+        StartMessage: {
+          Text: startMessage
+        }
+      })
+    });
+    // レスポンス形式例: { id: '...', threadId: '...', thread_id: '...' } を想定
+    const threadId = data?.id ?? data?.threadId ?? data?.thread_id;
+    if (!threadId) {
+      console.warn('[sreAgent] createThread response:', JSON.stringify(data));
+      throw new Error('createThread: スレッド ID をレスポンスから取得できませんでした');
+    }
+    console.log(`[sreAgent] createThread: ${threadId}`);
+    return threadId;
+  }
+
+  /**
    * スレッドにメッセージを送信する
    * @param {string} threadId
    * @param {string} message
@@ -105,17 +128,24 @@ class SreAgentClient {
 
       const { messages } = await this.getMessages(threadId);
 
-      // beforeCount より後に追加された assistant メッセージを探す
-      const newAssistantMsgs = messages
+      // beforeCount より後に追加されたエージェント応答メッセージを探す
+      const newAgentMsgs = messages
         .slice(beforeCount)
-        .filter(m => (m.role ?? '').toLowerCase() === 'assistant');
+        .filter((m) => {
+          const role = String(m.role ?? m.author?.role ?? '').toLowerCase();
+          return role === 'assistant' || role === 'sreagent' || role === 'agent';
+        });
 
-      if (newAssistantMsgs.length > 0) {
-        // 最後のアシスタントメッセージを返す
-        const last = newAssistantMsgs[newAssistantMsgs.length - 1];
-        return typeof last.content === 'string'
-          ? last.content
-          : JSON.stringify(last.content);
+      if (newAgentMsgs.length > 0) {
+        // 最後のエージェントメッセージを返す（text優先、互換でcontentも考慮）
+        const last = newAgentMsgs[newAgentMsgs.length - 1];
+        if (typeof last.text === 'string' && last.text.trim()) {
+          return last.text;
+        }
+        if (typeof last.content === 'string' && last.content.trim()) {
+          return last.content;
+        }
+        return JSON.stringify(last.content ?? last.text ?? last);
       }
     }
 
