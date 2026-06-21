@@ -35,7 +35,7 @@ var containerAppsEnvironmentName = 'cae-${prefix}'
 var botName = 'bot-${prefix}-${uniqueSuffix}'
 var containerImage = '${containerRegistryName}.azurecr.io/${containerImageRepository}:${containerImageTag}'
 
-resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = {
   name: managedIdentityName
   location: location
 }
@@ -51,7 +51,7 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+resource appInsights 'Microsoft.Insights/components@2022-06-01' = {
   name: appInsightsName
   location: location
   kind: 'web'
@@ -61,7 +61,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   }
 }
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-11-01' = {
   name: storageAccountName
   location: location
   sku: {
@@ -75,17 +75,31 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   }
 }
 
-resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-05-01' = {
+resource storageAccountDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: 'diag-${storageAccountName}-${uniqueSuffix}'
+  scope: storageAccount
+  properties: {
+    workspaceId: logAnalytics.id
+    metrics: [
+      {
+        category: 'Transaction'
+        enabled: true
+      }
+    ]
+  }
+}
+
+resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-11-01' = {
   parent: storageAccount
   name: 'default'
 }
 
-resource conversationTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = {
+resource conversationTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-11-01' = {
   parent: tableService
   name: 'ConversationThreadMap'
 }
 
-resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-06-01-preview' = {
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01' = {
   name: containerRegistryName
   location: location
   sku: {
@@ -103,7 +117,7 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-06-01-pr
   }
 }
 
-resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-preview' = {
+resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-11-02' = {
   name: containerAppsEnvironmentName
   location: location
   properties: {
@@ -156,7 +170,7 @@ resource sreAgent 'Microsoft.App/agents@2026-01-01' = {
         connectionString: appInsights.properties.ConnectionString
       }
     }
-    upgradeChannel: 'Preview'
+    upgradeChannel: 'Stable'
   }
 }
 
@@ -235,6 +249,40 @@ resource containerApp 'Microsoft.App/containerApps@2025-01-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
+          probes: [
+            {
+              type: 'Startup'
+              httpGet: {
+                path: '/healthz'
+                port: 8080
+              }
+              initialDelaySeconds: 5
+              periodSeconds: 10
+              timeoutSeconds: 3
+              failureThreshold: 12
+            }
+            {
+              type: 'Readiness'
+              httpGet: {
+                path: '/healthz'
+                port: 8080
+              }
+              initialDelaySeconds: 3
+              periodSeconds: 5
+              timeoutSeconds: 2
+              failureThreshold: 6
+            }
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/healthz'
+                port: 8080
+              }
+              periodSeconds: 30
+              timeoutSeconds: 3
+              failureThreshold: 3
+            }
+          ]
         }
       ]
       scale: {
@@ -245,7 +293,27 @@ resource containerApp 'Microsoft.App/containerApps@2025-01-01' = {
   }
 }
 
-resource botService 'Microsoft.BotService/botServices@2022-09-15' = {
+resource containerAppsEnvironmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: 'diag-${containerAppsEnvironmentName}-${uniqueSuffix}'
+  scope: containerAppsEnvironment
+  properties: {
+    workspaceId: logAnalytics.id
+    logs: [
+      {
+        categoryGroup: 'allLogs'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
+  }
+}
+
+resource botService 'Microsoft.BotService/botServices@2024-03-01' = {
   name: botName
   location: 'global'
   sku: {
@@ -262,7 +330,7 @@ resource botService 'Microsoft.BotService/botServices@2022-09-15' = {
   }
 }
 
-resource teamsChannel 'Microsoft.BotService/botServices/channels@2022-09-15' = {
+resource teamsChannel 'Microsoft.BotService/botServices/channels@2024-03-01' = {
   parent: botService
   name: 'MsTeamsChannel'
   location: 'global'
@@ -274,7 +342,7 @@ resource teamsChannel 'Microsoft.BotService/botServices/channels@2022-09-15' = {
   }
 }
 
-resource storageTableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource storageTableContributor 'Microsoft.Authorization/roleAssignments@2024-07-01' = {
   name: guid(storageAccount.id, managedIdentity.id, 'StorageTableDataContributor')
   scope: storageAccount
   properties: {
@@ -284,7 +352,7 @@ resource storageTableContributor 'Microsoft.Authorization/roleAssignments@2022-0
   }
 }
 
-resource storageBlobReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource storageBlobReader 'Microsoft.Authorization/roleAssignments@2024-07-01' = {
   name: guid(storageAccount.id, managedIdentity.id, 'StorageBlobDataReader')
   scope: storageAccount
   properties: {
@@ -294,21 +362,21 @@ resource storageBlobReader 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   }
 }
 
-resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(containerRegistry.id, managedIdentity.id, 'AcrPull')
-  scope: containerRegistry
+resource sreAgentAdministrator 'Microsoft.Authorization/roleAssignments@2024-07-01' = {
+  name: guid(sreAgent.id, managedIdentity.id, 'SreAgentAdministrator')
+  scope: sreAgent
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'e79298df-d852-4c6d-84f9-5d13249d1e55')
     principalId: managedIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
 }
 
-resource sreAgentAdministrator 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(sreAgent.id, managedIdentity.id, 'SreAgentAdministrator')
-  scope: sreAgent
+resource acrPull 'Microsoft.Authorization/roleAssignments@2024-07-01' = {
+  name: guid(containerRegistry.id, managedIdentity.id, 'AcrPull')
+  scope: containerRegistry
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'e79298df-d852-4c6d-84f9-5d13249d1e55')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
     principalId: managedIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
