@@ -10,6 +10,11 @@
 
 - infra/custom/sre-agent-teams-poc
 
+関連資料:
+
+- ARCHITECTURE.ja.md (全体構成、サービス役割、連携フロー、代替案の解説)
+- docs/onepage-architecture.ja.md (説明会向け 1 ページ図解)
+
 ---
 
 ## 1. まず最初に（5 分で確認）
