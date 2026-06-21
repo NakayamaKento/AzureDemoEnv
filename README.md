@@ -11,6 +11,7 @@ CSA向けの Azure デモ環境および検証環境を運用するためのリ�
 - パラメータ最小化テンプレート
 - 既定リージョンは `southwestasia`（必要時のみ上書き可）
 - 再利用モジュール追加時は既存シナリオを見直す
+- AVM 未適用の判断はシナリオ README に理由と移行条件を記録する
 
 ## 参照ドキュメント
 - docs/operations/scenario-intake-and-standards.md

@@ -114,7 +114,39 @@ az deployment group create \
 | `scenarioCode` | `csa01` | - | リソース名プレフィックス |
 | `location` | `southwestasia` | - | デプロイリージョン |
 | `spokeCount` | `2` | 1-4 | スポーク数（VM ペア数） |
-| `firewallPrivateIp` | `10.10.0.4` | - | Firewall Private IP |
+
+## AVM 適用状況
+
+### 適用済み（このシナリオで AVM を使用）
+
+- `br/public:avm/res/network/network-security-group`（Hub/Bastion/Spoke NSG）
+- `br/public:avm/res/network/route-table`（Spoke UDR）
+- `br/public:avm/res/network/public-ip-address`（Firewall/Bastion Public IP）
+- `br/public:avm/res/network/virtual-network/virtual-network-peering`（Hub-Spoke Peering）
+
+### 未適用（現時点でインライン維持）
+
+- Virtual Network
+  - 理由: 既存のネストされたサブネット構成と依存参照を崩さずに移行するために段階適用を優先
+  - 回避策: VNet 本体は現状維持し、周辺リソースから AVM 化
+  - 移行条件: サブネット定義と依存関係を AVM 入力へ安全にマッピングできる検証が完了した時点
+- Azure Firewall
+  - 理由: このシナリオでは Firewall をスケルトン構成で提供しており、ルールコレクション運用要件が未確定
+  - 回避策: 既存の最小実装を維持
+  - 移行条件: 運用するルールセット（Network/Application/NAT）要件を確定し、AVM モジュールで同等動作を確認できた時点
+- Azure Bastion
+  - 理由: 現行スケルトンの設定を変えずに段階導入するため、今回は Public IP/NSG まで先行適用
+  - 回避策: Bastion 本体は既存実装を維持
+  - 移行条件: SKU/機能フラグを含む設定互換性の検証完了後に AVM 化
+- NIC / Virtual Machine
+  - 理由: 既存の OS プロファイルと依存順序を変えないことを優先
+  - 回避策: ネットワーク基盤側の AVM 化を先行
+  - 移行条件: NIC/VM の構成同等性（イメージ、OS 設定、認証、依存関係）を検証できた時点
+
+### 見直しタイミング
+
+- 次回の AVM 見直し（定期レビュー）で未適用領域の再判定を実施する。
+- 機能追加時（Firewall ルール導入、Bastion 強化、VM 拡張）には同時に AVM 移行可否を再評価する。
 
 ## 主要機能
 

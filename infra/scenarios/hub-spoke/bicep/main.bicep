@@ -7,11 +7,16 @@ param scenarioCode string = 'csa01'
 param location string = 'southwestasia'
 
 @description('スポーク VNet の数（1-4）')
+@minValue(1)
+@maxValue(4)
 param spokeCount int = 2
 
 @secure()
 @description('VM 管理者パスワード（デプロイ時に指定してください）')
 param vmAdminPassword string
+
+@description('VM 管理者ユーザー名')
+param vmAdminUsername string = 'azureuser'
 
 var namePrefix = toLower('${scenarioCode}-${uniqueString(resourceGroup().id)}')
 var tags = {
@@ -31,11 +36,12 @@ var firewallName = '${take(namePrefix, 34)}-fw'
 var firewallPipName = '${take(namePrefix, 27)}-fw-pip'
 
 // Hub NSG
-resource hubNsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
-	name: hubNsgName
-	location: location
-	tags: tags
-	properties: {
+module hubNsg 'br/public:avm/res/network/network-security-group:0.5.3' = {
+	name: 'hubNsg'
+	params: {
+		name: hubNsgName
+		location: location
+		tags: tags
 		securityRules: [
 			{
 				name: 'allow-vnet-inbound'
@@ -55,11 +61,12 @@ resource hubNsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
 }
 
 // Bastion NSG
-resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
-	name: bastionNsgName
-	location: location
-	tags: tags
-	properties: {
+module bastionNsg 'br/public:avm/res/network/network-security-group:0.5.3' = {
+	name: 'bastionNsg'
+	params: {
+		name: bastionNsgName
+		location: location
+		tags: tags
 		securityRules: [
 			{
 				name: 'allow-https-inbound'
@@ -157,15 +164,15 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
 }
 
 // Firewall Public IP
-resource firewallPip 'Microsoft.Network/publicIPAddresses@2023-11-01' = {
-	name: firewallPipName
-	location: location
-	tags: tags
-	sku: {
-		name: 'Standard'
-		tier: 'Regional'
-	}
-	properties: {
+module firewallPip 'br/public:avm/res/network/public-ip-address:0.12.0' = {
+	name: 'firewallPip'
+	params: {
+		name: firewallPipName
+		location: location
+		tags: tags
+		availabilityZones: []
+		skuName: 'Standard'
+		skuTier: 'Regional'
 		publicIPAllocationMethod: 'Static'
 	}
 }
@@ -193,7 +200,7 @@ resource hubVnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
 				properties: {
 					addressPrefix: '10.10.1.0/27'
 					networkSecurityGroup: {
-						id: bastionNsg.id
+						id: bastionNsg.outputs.resourceId
 					}
 				}
 			}
@@ -208,7 +215,7 @@ resource hubVnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
 				properties: {
 					addressPrefix: '10.10.2.0/24'
 					networkSecurityGroup: {
-						id: hubNsg.id
+						id: hubNsg.outputs.resourceId
 					}
 				}
 			}
@@ -232,7 +239,7 @@ resource firewall 'Microsoft.Network/azureFirewalls@2023-11-01' = {
 				name: 'firewall-config'
 				properties: {
 					publicIPAddress: {
-						id: firewallPip.id
+						id: firewallPip.outputs.resourceId
 					}
 					subnet: {
 						id: '${hubVnet.id}/subnets/AzureFirewallSubnet'
@@ -247,15 +254,15 @@ resource firewall 'Microsoft.Network/azureFirewalls@2023-11-01' = {
 }
 
 // Bastion Public IP
-resource bastionPip 'Microsoft.Network/publicIPAddresses@2023-11-01' = {
-	name: '${take(namePrefix, 28)}-bastion-pip'
-	location: location
-	tags: tags
-	sku: {
-		name: 'Standard'
-		tier: 'Regional'
-	}
-	properties: {
+module bastionPip 'br/public:avm/res/network/public-ip-address:0.12.0' = {
+	name: 'bastionPip'
+	params: {
+		name: '${take(namePrefix, 28)}-bastion-pip'
+		location: location
+		tags: tags
+		availabilityZones: []
+		skuName: 'Standard'
+		skuTier: 'Regional'
 		publicIPAllocationMethod: 'Static'
 	}
 }
@@ -277,7 +284,7 @@ resource bastion 'Microsoft.Network/bastionHosts@2023-11-01' = {
 						id: '${hubVnet.id}/subnets/AzureBastionSubnet'
 					}
 					publicIPAddress: {
-						id: bastionPip.id
+						id: bastionPip.outputs.resourceId
 					}
 				}
 			}
@@ -301,11 +308,12 @@ var spokeConfigs = [for i in range(0, spokeCount): {
 }]
 
 // Spoke NSGs
-resource spokeNsgs 'Microsoft.Network/networkSecurityGroups@2023-11-01' = [for config in spokeConfigs: {
-	name: config.nsgName
-	location: location
-	tags: tags
-	properties: {
+module spokeNsgs 'br/public:avm/res/network/network-security-group:0.5.3' = [for config in spokeConfigs: {
+	name: 'spokeNsg-${config.spokeNum}'
+	params: {
+		name: config.nsgName
+		location: location
+		tags: tags
 		securityRules: [
 			{
 				name: 'allow-vnet-inbound'
@@ -351,11 +359,12 @@ resource spokeNsgs 'Microsoft.Network/networkSecurityGroups@2023-11-01' = [for c
 }]
 
 // Spoke UDRs (User Defined Routes)
-resource spokeUdrs 'Microsoft.Network/routeTables@2023-11-01' = [for config in spokeConfigs: {
-	name: config.udrName
-	location: location
-	tags: tags
-	properties: {
+module spokeUdrs 'br/public:avm/res/network/route-table:0.5.0' = [for config in spokeConfigs: {
+	name: 'spokeUdr-${config.spokeNum}'
+	params: {
+		name: config.udrName
+		location: location
+		tags: tags
 		routes: [
 			{
 				name: 'to-firewall'
@@ -386,10 +395,10 @@ resource spokeVnets 'Microsoft.Network/virtualNetworks@2023-11-01' = [for (confi
 				properties: {
 					addressPrefix: config.vmSubnetPrefix
 					networkSecurityGroup: {
-						id: spokeNsgs[idx].id
+						id: spokeNsgs[idx].outputs.resourceId
 					}
 					routeTable: {
-						id: spokeUdrs[idx].id
+						id: spokeUdrs[idx].outputs.resourceId
 					}
 				}
 			}
@@ -398,7 +407,7 @@ resource spokeVnets 'Microsoft.Network/virtualNetworks@2023-11-01' = [for (confi
 				properties: {
 					addressPrefix: config.peSubnetPrefix
 					routeTable: {
-						id: spokeUdrs[idx].id
+						id: spokeUdrs[idx].outputs.resourceId
 					}
 				}
 			}
@@ -407,29 +416,29 @@ resource spokeVnets 'Microsoft.Network/virtualNetworks@2023-11-01' = [for (confi
 }]
 
 // Hub to Spoke Peerings
-resource hubToSpokePeerings 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2023-11-01' = [for (config, idx) in spokeConfigs: {
-	parent: hubVnet
-	name: 'to-spoke-${config.spokeNum}'
-	properties: {
-		remoteVirtualNetwork: {
-			id: spokeVnets[idx].id
-		}
+module hubToSpokePeerings 'br/public:avm/res/network/virtual-network/virtual-network-peering:0.2.0' = [for (config, idx) in spokeConfigs: {
+	name: 'hubToSpokePeering-${config.spokeNum}'
+	params: {
+		name: 'to-spoke-${config.spokeNum}'
+		localVnetName: hubVnet.name
+		remoteVirtualNetworkResourceId: spokeVnets[idx].id
 		allowVirtualNetworkAccess: true
 		allowForwardedTraffic: true
 		allowGatewayTransit: true
+		doNotVerifyRemoteGateways: true
 	}
 }]
 
 // Spoke to Hub Peerings
-resource spokeToHubPeerings 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2023-11-01' = [for (config, idx) in spokeConfigs: {
-	parent: spokeVnets[idx]
-	name: 'to-hub'
-	properties: {
-		remoteVirtualNetwork: {
-			id: hubVnet.id
-		}
+module spokeToHubPeerings 'br/public:avm/res/network/virtual-network/virtual-network-peering:0.2.0' = [for (config, idx) in spokeConfigs: {
+	name: 'spokeToHubPeering-${config.spokeNum}'
+	params: {
+		name: 'to-hub'
+		localVnetName: spokeVnets[idx].name
+		remoteVirtualNetworkResourceId: hubVnet.id
 		allowVirtualNetworkAccess: true
 		allowForwardedTraffic: true
+		doNotVerifyRemoteGateways: true
 		useRemoteGateways: false
 	}
 }]
@@ -511,7 +520,7 @@ resource winVms 'Microsoft.Compute/virtualMachines@2023-07-01' = [for (config, i
 		}
 		osProfile: {
 			computerName: 'spoke${config.spokeNum}win'
-			adminUsername: 'azureuser'
+			adminUsername: vmAdminUsername
 			adminPassword: vmAdminPassword
 			windowsConfiguration: {
 				enableAutomaticUpdates: true
@@ -557,7 +566,7 @@ resource lnxVms 'Microsoft.Compute/virtualMachines@2023-07-01' = [for (config, i
 		}
 		osProfile: {
 			computerName: 'spoke${config.spokeNum}lnx'
-			adminUsername: 'azureuser'
+			adminUsername: vmAdminUsername
 			adminPassword: vmAdminPassword
 			linuxConfiguration: {
 				disablePasswordAuthentication: false

@@ -24,3 +24,25 @@ jobs:
             echo "Validating $f"
             az bicep build --file "$f"
           done
+
+      - name: AVM 利用状況を警告表示
+        run: |
+          missing=0
+          target_files=$(find infra/scenarios -name "*.bicep" -type f ! -path "*/_templates/*")
+          if [ -z "$target_files" ]; then
+            echo "No scenario bicep files"
+            exit 0
+          fi
+
+          for f in $target_files; do
+            if ! grep -Eq "br/public:avm/res/" "$f"; then
+              echo "::warning file=$f::AVM参照が見つかりません。AVM未適用理由をシナリオREADMEへ記載してください。"
+              missing=$((missing + 1))
+            fi
+          done
+
+          if [ "$missing" -gt 0 ]; then
+            echo "AVM warning count: $missing"
+          else
+            echo "All scenario bicep files include AVM references"
+          fi

@@ -12,3 +12,5 @@
 - 既定リージョンは `southwestasia`
 - 最小パラメータ（`scenarioCode`, `location`）を原則とする
 - モジュール追加時は既存シナリオを見直す
+- AVM があるリソースは AVM を優先して採用する
+- AVM 未適用の理由は対象シナリオの README に記載する

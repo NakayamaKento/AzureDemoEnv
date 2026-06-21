@@ -25,6 +25,13 @@ foreach ($file in $bicepFiles) {
     $regex = [regex]::new($pattern)
     $firstRef = $regex.Match($content)
     if (-not $firstRef.Success) {
+        $results.Add([pscustomobject]@{
+            File = $file.FullName.Replace($repoRoot + [System.IO.Path]::DirectorySeparatorChar, '')
+            Module = '-'
+            Current = '-'
+            Latest = '-'
+            Status = 'No AVM references'
+        })
         continue
     }
 
@@ -119,6 +126,7 @@ Write-Host "Report generated: $reportFullPath"
 
 $outdatedCount = @($results | Where-Object { $_.Status -eq 'Needs Update' }).Count
 $failedCount = @($results | Where-Object { $_.Status -eq 'Failed' }).Count
+$noAvmCount = @($results | Where-Object { $_.Status -eq 'No AVM references' }).Count
 
 if ($failedCount -gt 0) {
     Write-Warning "Failed to fetch tags for $failedCount modules"
@@ -126,4 +134,8 @@ if ($failedCount -gt 0) {
 
 if ($outdatedCount -gt 0 -and -not $Apply) {
     Write-Warning "Found $outdatedCount outdated AVM references"
+}
+
+if ($noAvmCount -gt 0) {
+    Write-Warning "Found $noAvmCount Bicep files without AVM references"
 }
