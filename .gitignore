@@ -21,3 +21,11 @@ Thumbs.db
 # Local request drafts (keep template only)
 requests/local/*.yaml
 !requests/local/scenario-request.template.yaml
+
+# SRE Agent Teams POC generated artifacts
+infra/custom/sre-agent-teams-poc/TeamsAppPackage-*.zip
+infra/custom/sre-agent-teams-poc/teams-manifest-*/
+infra/custom/sre-agent-teams-poc/bot-app-package*.zip
+infra/custom/sre-agent-teams-poc/bot-app-deploy.zip
+infra/custom/sre-agent-teams-poc/logs/unzipped/
+infra/custom/sre-agent-teams-poc/logs/*.zip

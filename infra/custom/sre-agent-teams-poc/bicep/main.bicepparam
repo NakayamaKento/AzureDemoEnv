@@ -1,0 +1,10 @@
+using './main.bicep'
+
+param scenarioCode = 'poc'
+param location = 'koreacentral'
+param agentLocation = 'eastus2'
+param tenantId = 'e1b7b5a9-aacf-4cd3-bc37-5ef335686a3c'
+param containerAppName = 'ca-sre-teams-bot'
+param agentName = 'sre-agent-poc'
+param containerImageRepository = 'sre-teams-bot'
+param containerImageTag = 'aca-v7'

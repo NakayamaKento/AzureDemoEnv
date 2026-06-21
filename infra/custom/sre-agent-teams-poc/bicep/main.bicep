@@ -3,41 +3,56 @@ targetScope = 'resourceGroup'
 @description('命名プレフィックスに使用するコード')
 param scenarioCode string = 'poc'
 
-@description('デプロイリージョン（SRE Agent 対応リージョン）')
+@description('アプリ系リソースのデプロイリージョン')
 param location string = 'koreacentral'
+
+@description('SRE Agent のデプロイリージョン')
+param agentLocation string = 'eastus2'
 
 @description('Azure テナント ID')
 param tenantId string = tenant().tenantId
 
+@description('Container App 名')
+param containerAppName string = 'ca-sre-teams-bot'
+
+@description('SRE Agent 名')
+param agentName string = 'sre-agent-poc'
+
+@description('Container App が利用するコンテナーイメージのリポジトリ名')
+param containerImageRepository string = 'sre-teams-bot'
+
+@description('Container App が利用するコンテナーイメージのタグ')
+param containerImageTag string = 'aca-v7'
+
 var prefix = 'sre-${scenarioCode}'
 var uniqueSuffix = take(uniqueString(resourceGroup().id), 8)
-var uamiName = 'uami-${prefix}'
-var lawName = 'law-${prefix}'
-var aiName = 'ai-${prefix}'
+var managedIdentityName = 'uami-${prefix}'
+var logAnalyticsName = 'law-${prefix}'
+var appInsightsName = 'ai-${prefix}'
 var storageAccountName = 'st${replace(prefix, '-', '')}${uniqueSuffix}'
-var aspName = 'asp-${prefix}'
-var funcAppName = 'func-${prefix}-${uniqueSuffix}'
-var botName = 'bot-${prefix}'
+var containerRegistryName = 'acr${replace(prefix, '-', '')}${uniqueSuffix}'
+var containerAppsEnvironmentName = 'cae-${prefix}'
+var botName = 'bot-${prefix}-${uniqueSuffix}'
+var containerImage = '${containerRegistryName}.azurecr.io/${containerImageRepository}:${containerImageTag}'
 
-// ── User-Assigned Managed Identity ──────────────────────────────────────────
-resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: uamiName
+resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: managedIdentityName
   location: location
 }
 
-// ── Log Analytics Workspace ──────────────────────────────────────────────────
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
-  name: lawName
+  name: logAnalyticsName
   location: location
   properties: {
-    sku: { name: 'PerGB2018' }
+    sku: {
+      name: 'PerGB2018'
+    }
     retentionInDays: 30
   }
 }
 
-// ── Application Insights ─────────────────────────────────────────────────────
 resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
-  name: aiName
+  name: appInsightsName
   location: location
   kind: 'web'
   properties: {
@@ -46,11 +61,12 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   }
 }
 
-// ── Storage Account（Functions 用 + Table Storage：会話スレッドマッピング）─
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
   location: location
-  sku: { name: 'Standard_LRS' }
+  sku: {
+    name: 'Standard_LRS'
+  }
   kind: 'StorageV2'
   properties: {
     minimumTlsVersion: 'TLS1_2'
@@ -69,79 +85,183 @@ resource conversationTable 'Microsoft.Storage/storageAccounts/tableServices/tabl
   name: 'ConversationThreadMap'
 }
 
-// ── App Service Plan（B1 Dedicated: SignalR 長時間接続に対応）───────────────
-resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
-  name: aspName
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-06-01-preview' = {
+  name: containerRegistryName
   location: location
   sku: {
-    name: 'B1'
-    tier: 'Basic'
-  }
-}
-
-// ── Azure Functions App（Node.js 20、Bot ミドルウェア）─────────────────────
-var storageConnString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};EndpointSuffix=${environment().suffixes.storage};AccountKey=${storageAccount.listKeys().keys[0].value}'
-
-resource funcApp 'Microsoft.Web/sites@2023-12-01' = {
-  name: funcAppName
-  location: location
-  kind: 'functionapp'
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${uami.id}': {}
-    }
+    name: 'Basic'
   }
   properties: {
-    serverFarmId: appServicePlan.id
-    httpsOnly: true
-    siteConfig: {
-      nodeVersion: '~20'
-      appSettings: [
-        { name: 'AzureWebJobsStorage', value: storageConnString }
-        { name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING', value: storageConnString }
-        { name: 'WEBSITE_CONTENTSHARE', value: toLower(funcAppName) }
-        { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
-        { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'node' }
-        { name: 'WEBSITE_NODE_DEFAULT_VERSION', value: '~20' }
-        { name: 'APPINSIGHTS_INSTRUMENTATIONKEY', value: appInsights.properties.InstrumentationKey }
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsights.properties.ConnectionString }
-        // Bot Framework（UAMI ベース認証 — クライアントシークレット不要）
-        { name: 'MICROSOFT_APP_ID', value: uami.properties.clientId }
-        { name: 'MICROSOFT_APP_TYPE', value: 'UserAssignedMSI' }
-        { name: 'MICROSOFT_APP_TENANT_ID', value: tenantId }
-        { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
-        // Table Storage（会話スレッドマッピング）
-        { name: 'STORAGE_ACCOUNT_NAME', value: storageAccount.name }
-        { name: 'STORAGE_TABLE_CONN', value: storageConnString }
-        // SRE Agent（deploy.ps1 が後で設定する）
-        { name: 'SRE_AGENT_RESOURCE_ID', value: '' }
-        { name: 'SRE_AGENT_ENDPOINT', value: '' }
-      ]
-      cors: {
-        allowedOrigins: ['https://portal.azure.com']
+    adminUserEnabled: false
+    publicNetworkAccess: 'Enabled'
+    networkRuleBypassOptions: 'AzureServices'
+    policies: {
+      azureADAuthenticationAsArmPolicy: {
+        status: 'enabled'
       }
     }
   }
 }
 
-// ── Azure Bot Service（UAMI を App Identity として使用）────────────────────
-resource botService 'Microsoft.BotService/botServices@2022-09-15' = {
-  name: botName
-  location: 'global'
-  sku: { name: 'F0' }
-  kind: 'azurebot'
+resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-preview' = {
+  name: containerAppsEnvironmentName
+  location: location
   properties: {
-    displayName: 'SRE Agent Teams Bot (POC)'
-    endpoint: 'https://${funcApp.properties.defaultHostName}/api/messages'
-    msaAppId: uami.properties.clientId
-    msaAppTenantId: tenantId
-    msaAppType: 'UserAssignedMSI'
-    msaAppMSIResourceId: uami.id
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: logAnalytics.properties.customerId
+        sharedKey: logAnalytics.listKeys().primarySharedKey
+      }
+    }
+    publicNetworkAccess: 'Enabled'
+    workloadProfiles: [
+      {
+        name: 'Consumption'
+        workloadProfileType: 'Consumption'
+      }
+    ]
+    zoneRedundant: false
   }
 }
 
-// ── Teams チャネル有効化 ─────────────────────────────────────────────────────
+resource sreAgent 'Microsoft.App/agents@2026-01-01' = {
+  name: agentName
+  location: agentLocation
+  identity: {
+    type: 'SystemAssigned,UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentity.id}': {}
+    }
+  }
+  properties: {
+    actionConfiguration: {
+      accessLevel: 'Low'
+      identity: managedIdentity.id
+      mode: 'Review'
+    }
+    defaultModel: {
+      provider: 'Anthropic'
+      name: 'Automatic'
+    }
+    knowledgeGraphConfiguration: {
+      identity: managedIdentity.id
+      managedResources: [
+        resourceGroup().id
+      ]
+    }
+    logConfiguration: {
+      applicationInsightsConfiguration: {
+        appId: appInsights.properties.AppId
+        connectionString: appInsights.properties.ConnectionString
+      }
+    }
+    upgradeChannel: 'Preview'
+  }
+}
+
+resource containerApp 'Microsoft.App/containerApps@2025-01-01' = {
+  name: containerAppName
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentity.id}': {}
+    }
+  }
+  properties: {
+    managedEnvironmentId: containerAppsEnvironment.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: {
+        external: true
+        targetPort: 8080
+        allowInsecure: false
+        transport: 'Auto'
+        traffic: [
+          {
+            latestRevision: true
+            weight: 100
+          }
+        ]
+      }
+      registries: [
+        {
+          server: '${containerRegistry.name}.azurecr.io'
+          identity: managedIdentity.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: containerAppName
+          image: containerImage
+          env: [
+            {
+              name: 'MICROSOFT_APP_ID'
+              value: managedIdentity.properties.clientId
+            }
+            {
+              name: 'MICROSOFT_APP_TYPE'
+              value: 'UserAssignedMSI'
+            }
+            {
+              name: 'MICROSOFT_APP_TENANT_ID'
+              value: tenantId
+            }
+            {
+              name: 'AZURE_CLIENT_ID'
+              value: managedIdentity.properties.clientId
+            }
+            {
+              name: 'STORAGE_ACCOUNT_NAME'
+              value: storageAccount.name
+            }
+            {
+              name: 'SRE_AGENT_RESOURCE_ID'
+              value: sreAgent.id
+            }
+            {
+              name: 'SRE_AGENT_ENDPOINT'
+              value: sreAgent.properties.agentEndpoint
+            }
+            {
+              name: 'PORT'
+              value: '8080'
+            }
+          ]
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 2
+      }
+    }
+  }
+}
+
+resource botService 'Microsoft.BotService/botServices@2022-09-15' = {
+  name: botName
+  location: 'global'
+  sku: {
+    name: 'F0'
+  }
+  kind: 'azurebot'
+  properties: {
+    displayName: 'SRE Agent Teams Bot (POC)'
+    endpoint: 'https://${containerApp.properties.configuration.ingress.fqdn}/api/messages'
+    msaAppId: managedIdentity.properties.clientId
+    msaAppTenantId: tenantId
+    msaAppType: 'UserAssignedMSI'
+    msaAppMSIResourceId: managedIdentity.id
+  }
+}
+
 resource teamsChannel 'Microsoft.BotService/botServices/channels@2022-09-15' = {
   parent: botService
   name: 'MsTeamsChannel'
@@ -154,26 +274,59 @@ resource teamsChannel 'Microsoft.BotService/botServices/channels@2022-09-15' = {
   }
 }
 
-// ── RBAC: Storage Table Data Contributor（会話マッピング書き込み）──────────
-resource rbacTableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, uami.id, 'StorageTableDataContributor')
+resource storageTableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, managedIdentity.id, 'StorageTableDataContributor')
   scope: storageAccount
   properties: {
-    // Storage Table Data Contributor
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
-    principalId: uami.properties.principalId
+    principalId: managedIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
 }
 
-// ── Outputs ──────────────────────────────────────────────────────────────────
-output funcAppName string = funcApp.name
-output funcAppHostname string = funcApp.properties.defaultHostName
+resource storageBlobReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, managedIdentity.id, 'StorageBlobDataReader')
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(containerRegistry.id, managedIdentity.id, 'AcrPull')
+  scope: containerRegistry
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource sreAgentAdministrator 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(sreAgent.id, managedIdentity.id, 'SreAgentAdministrator')
+  scope: sreAgent
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'e79298df-d852-4c6d-84f9-5d13249d1e55')
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+output containerAppName string = containerApp.name
+output containerAppFqdn string = containerApp.properties.configuration.ingress.fqdn
+output containerAppUrl string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
 output botName string = botService.name
-output botMsaAppId string = uami.properties.clientId
-output uamiId string = uami.id
-output uamiClientId string = uami.properties.clientId
-output uamiPrincipalId string = uami.properties.principalId
+output botMsaAppId string = managedIdentity.properties.clientId
+output uamiId string = managedIdentity.id
+output uamiClientId string = managedIdentity.properties.clientId
+output uamiPrincipalId string = managedIdentity.properties.principalId
 output appInsightsId string = appInsights.id
+output managedEnvironmentId string = containerAppsEnvironment.id
 output resourceGroupId string = resourceGroup().id
 output storageAccountName string = storageAccount.name
+output containerRegistryName string = containerRegistry.name
+output containerImage string = containerImage
+output agentResourceId string = sreAgent.id
+output agentEndpoint string = sreAgent.properties.agentEndpoint

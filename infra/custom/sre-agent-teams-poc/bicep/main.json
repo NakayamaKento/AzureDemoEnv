@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.37.4.10188",
-      "templateHash": "17941098404531131326"
+      "templateHash": "17757196872258666071"
     }
   },
   "parameters": {
@@ -20,7 +20,14 @@
       "type": "string",
       "defaultValue": "koreacentral",
       "metadata": {
-        "description": "デプロイリージョン（SRE Agent 対応リージョン）"
+        "description": "アプリ系リソースのデプロイリージョン"
+      }
+    },
+    "agentLocation": {
+      "type": "string",
+      "defaultValue": "eastus2",
+      "metadata": {
+        "description": "SRE Agent のデプロイリージョン"
       }
     },
     "tenantId": {
@@ -29,30 +36,59 @@
       "metadata": {
         "description": "Azure テナント ID"
       }
+    },
+    "containerAppName": {
+      "type": "string",
+      "defaultValue": "ca-sre-teams-bot",
+      "metadata": {
+        "description": "Container App 名"
+      }
+    },
+    "agentName": {
+      "type": "string",
+      "defaultValue": "sre-agent-poc",
+      "metadata": {
+        "description": "SRE Agent 名"
+      }
+    },
+    "containerImageRepository": {
+      "type": "string",
+      "defaultValue": "sre-teams-bot",
+      "metadata": {
+        "description": "Container App が利用するコンテナーイメージのリポジトリ名"
+      }
+    },
+    "containerImageTag": {
+      "type": "string",
+      "defaultValue": "aca-v7",
+      "metadata": {
+        "description": "Container App が利用するコンテナーイメージのタグ"
+      }
     }
   },
   "variables": {
     "prefix": "[format('sre-{0}', parameters('scenarioCode'))]",
     "uniqueSuffix": "[take(uniqueString(resourceGroup().id), 8)]",
-    "uamiName": "[format('uami-{0}', variables('prefix'))]",
-    "lawName": "[format('law-{0}', variables('prefix'))]",
-    "aiName": "[format('ai-{0}', variables('prefix'))]",
+    "managedIdentityName": "[format('uami-{0}', variables('prefix'))]",
+    "logAnalyticsName": "[format('law-{0}', variables('prefix'))]",
+    "appInsightsName": "[format('ai-{0}', variables('prefix'))]",
     "storageAccountName": "[format('st{0}{1}', replace(variables('prefix'), '-', ''), variables('uniqueSuffix'))]",
-    "aspName": "[format('asp-{0}', variables('prefix'))]",
-    "funcAppName": "[format('func-{0}-{1}', variables('prefix'), variables('uniqueSuffix'))]",
-    "botName": "[format('bot-{0}', variables('prefix'))]"
+    "containerRegistryName": "[format('acr{0}{1}', replace(variables('prefix'), '-', ''), variables('uniqueSuffix'))]",
+    "containerAppsEnvironmentName": "[format('cae-{0}', variables('prefix'))]",
+    "botName": "[format('bot-{0}-{1}', variables('prefix'), variables('uniqueSuffix'))]",
+    "containerImage": "[format('{0}.azurecr.io/{1}:{2}', variables('containerRegistryName'), parameters('containerImageRepository'), parameters('containerImageTag'))]"
   },
   "resources": [
     {
       "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
       "apiVersion": "2023-01-31",
-      "name": "[variables('uamiName')]",
+      "name": "[variables('managedIdentityName')]",
       "location": "[parameters('location')]"
     },
     {
       "type": "Microsoft.OperationalInsights/workspaces",
       "apiVersion": "2023-09-01",
-      "name": "[variables('lawName')]",
+      "name": "[variables('logAnalyticsName')]",
       "location": "[parameters('location')]",
       "properties": {
         "sku": {
@@ -64,15 +100,15 @@
     {
       "type": "Microsoft.Insights/components",
       "apiVersion": "2020-02-02",
-      "name": "[variables('aiName')]",
+      "name": "[variables('appInsightsName')]",
       "location": "[parameters('location')]",
       "kind": "web",
       "properties": {
         "Application_Type": "web",
-        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('lawName'))]"
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
       },
       "dependsOn": [
-        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('lawName'))]"
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
       ]
     },
     {
@@ -107,110 +143,181 @@
       ]
     },
     {
-      "type": "Microsoft.Web/serverfarms",
-      "apiVersion": "2023-12-01",
-      "name": "[variables('aspName')]",
+      "type": "Microsoft.ContainerRegistry/registries",
+      "apiVersion": "2023-06-01-preview",
+      "name": "[variables('containerRegistryName')]",
       "location": "[parameters('location')]",
       "sku": {
-        "name": "B1",
-        "tier": "Basic"
+        "name": "Basic"
+      },
+      "properties": {
+        "adminUserEnabled": false,
+        "publicNetworkAccess": "Enabled",
+        "networkRuleBypassOptions": "AzureServices",
+        "policies": {
+          "azureADAuthenticationAsArmPolicy": {
+            "status": "enabled"
+          }
+        }
       }
     },
     {
-      "type": "Microsoft.Web/sites",
-      "apiVersion": "2023-12-01",
-      "name": "[variables('funcAppName')]",
+      "type": "Microsoft.App/managedEnvironments",
+      "apiVersion": "2024-10-02-preview",
+      "name": "[variables('containerAppsEnvironmentName')]",
       "location": "[parameters('location')]",
-      "kind": "functionapp",
+      "properties": {
+        "appLogsConfiguration": {
+          "destination": "log-analytics",
+          "logAnalyticsConfiguration": {
+            "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName')), '2023-09-01').customerId]",
+            "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName')), '2023-09-01').primarySharedKey]"
+          }
+        },
+        "publicNetworkAccess": "Enabled",
+        "workloadProfiles": [
+          {
+            "name": "Consumption",
+            "workloadProfileType": "Consumption"
+          }
+        ],
+        "zoneRedundant": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.App/agents",
+      "apiVersion": "2026-01-01",
+      "name": "[parameters('agentName')]",
+      "location": "[parameters('agentLocation')]",
       "identity": {
-        "type": "UserAssigned",
+        "type": "SystemAssigned,UserAssigned",
         "userAssignedIdentities": {
-          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')))]": {}
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')))]": {}
         }
       },
       "properties": {
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('aspName'))]",
-        "httpsOnly": true,
-        "siteConfig": {
-          "nodeVersion": "~20",
-          "appSettings": [
+        "actionConfiguration": {
+          "accessLevel": "Low",
+          "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]",
+          "mode": "Review"
+        },
+        "defaultModel": {
+          "provider": "Anthropic",
+          "name": "Automatic"
+        },
+        "knowledgeGraphConfiguration": {
+          "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]",
+          "managedResources": [
+            "[resourceGroup().id]"
+          ]
+        },
+        "logConfiguration": {
+          "applicationInsightsConfiguration": {
+            "appId": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').AppId]",
+            "connectionString": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
+          }
+        },
+        "upgradeChannel": "Preview"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2025-01-01",
+      "name": "[parameters('containerAppName')]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')))]": {}
+        }
+      },
+      "properties": {
+        "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppsEnvironmentName'))]",
+        "configuration": {
+          "activeRevisionsMode": "Single",
+          "ingress": {
+            "external": true,
+            "targetPort": 8080,
+            "allowInsecure": false,
+            "transport": "Auto",
+            "traffic": [
+              {
+                "latestRevision": true,
+                "weight": 100
+              }
+            ]
+          },
+          "registries": [
             {
-              "name": "AzureWebJobsStorage",
-              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};EndpointSuffix={1};AccountKey={2}', variables('storageAccountName'), environment().suffixes.storage, listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-05-01').keys[0].value)]"
-            },
+              "server": "[format('{0}.azurecr.io', variables('containerRegistryName'))]",
+              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]"
+            }
+          ]
+        },
+        "template": {
+          "containers": [
             {
-              "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
-              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};EndpointSuffix={1};AccountKey={2}', variables('storageAccountName'), environment().suffixes.storage, listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-05-01').keys[0].value)]"
-            },
-            {
-              "name": "WEBSITE_CONTENTSHARE",
-              "value": "[toLower(variables('funcAppName'))]"
-            },
-            {
-              "name": "FUNCTIONS_EXTENSION_VERSION",
-              "value": "~4"
-            },
-            {
-              "name": "FUNCTIONS_WORKER_RUNTIME",
-              "value": "node"
-            },
-            {
-              "name": "WEBSITE_NODE_DEFAULT_VERSION",
-              "value": "~20"
-            },
-            {
-              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
-              "value": "[reference(resourceId('Microsoft.Insights/components', variables('aiName')), '2020-02-02').InstrumentationKey]"
-            },
-            {
-              "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
-              "value": "[reference(resourceId('Microsoft.Insights/components', variables('aiName')), '2020-02-02').ConnectionString]"
-            },
-            {
-              "name": "MICROSOFT_APP_ID",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), '2023-01-31').clientId]"
-            },
-            {
-              "name": "MICROSOFT_APP_TYPE",
-              "value": "UserAssignedMSI"
-            },
-            {
-              "name": "MICROSOFT_APP_TENANT_ID",
-              "value": "[parameters('tenantId')]"
-            },
-            {
-              "name": "AZURE_CLIENT_ID",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), '2023-01-31').clientId]"
-            },
-            {
-              "name": "STORAGE_ACCOUNT_NAME",
-              "value": "[variables('storageAccountName')]"
-            },
-            {
-              "name": "STORAGE_TABLE_CONN",
-              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};EndpointSuffix={1};AccountKey={2}', variables('storageAccountName'), environment().suffixes.storage, listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-05-01').keys[0].value)]"
-            },
-            {
-              "name": "SRE_AGENT_RESOURCE_ID",
-              "value": ""
-            },
-            {
-              "name": "SRE_AGENT_ENDPOINT",
-              "value": ""
+              "name": "[parameters('containerAppName')]",
+              "image": "[variables('containerImage')]",
+              "env": [
+                {
+                  "name": "MICROSOFT_APP_ID",
+                  "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').clientId]"
+                },
+                {
+                  "name": "MICROSOFT_APP_TYPE",
+                  "value": "UserAssignedMSI"
+                },
+                {
+                  "name": "MICROSOFT_APP_TENANT_ID",
+                  "value": "[parameters('tenantId')]"
+                },
+                {
+                  "name": "AZURE_CLIENT_ID",
+                  "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').clientId]"
+                },
+                {
+                  "name": "STORAGE_ACCOUNT_NAME",
+                  "value": "[variables('storageAccountName')]"
+                },
+                {
+                  "name": "SRE_AGENT_RESOURCE_ID",
+                  "value": "[resourceId('Microsoft.App/agents', parameters('agentName'))]"
+                },
+                {
+                  "name": "SRE_AGENT_ENDPOINT",
+                  "value": "[reference(resourceId('Microsoft.App/agents', parameters('agentName')), '2026-01-01').agentEndpoint]"
+                },
+                {
+                  "name": "PORT",
+                  "value": "8080"
+                }
+              ],
+              "resources": {
+                "cpu": "[json('0.5')]",
+                "memory": "1Gi"
+              }
             }
           ],
-          "cors": {
-            "allowedOrigins": [
-              "https://portal.azure.com"
-            ]
+          "scale": {
+            "minReplicas": 1,
+            "maxReplicas": 2
           }
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Insights/components', variables('aiName'))]",
-        "[resourceId('Microsoft.Web/serverfarms', variables('aspName'))]",
-        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName'))]"
+        "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppsEnvironmentName'))]",
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('containerRegistryName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]",
+        "[resourceId('Microsoft.App/agents', parameters('agentName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
       ]
     },
     {
@@ -224,15 +331,15 @@
       "kind": "azurebot",
       "properties": {
         "displayName": "SRE Agent Teams Bot (POC)",
-        "endpoint": "[format('https://{0}/api/messages', reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2023-12-01').defaultHostName)]",
-        "msaAppId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), '2023-01-31').clientId]",
+        "endpoint": "[format('https://{0}/api/messages', reference(resourceId('Microsoft.App/containerApps', parameters('containerAppName')), '2025-01-01').configuration.ingress.fqdn)]",
+        "msaAppId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').clientId]",
         "msaAppTenantId": "[parameters('tenantId')]",
         "msaAppType": "UserAssignedMSI",
-        "msaAppMSIResourceId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName'))]"
+        "msaAppMSIResourceId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]"
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Web/sites', variables('funcAppName'))]",
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName'))]"
+        "[resourceId('Microsoft.App/containerApps', parameters('containerAppName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]"
       ]
     },
     {
@@ -254,26 +361,75 @@
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
       "scope": "[format('Microsoft.Storage/storageAccounts/{0}', variables('storageAccountName'))]",
-      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), 'StorageTableDataContributor')]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), 'StorageTableDataContributor')]",
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')]",
-        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), '2023-01-31').principalId]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').principalId]",
         "principalType": "ServicePrincipal"
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName'))]"
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.Storage/storageAccounts/{0}', variables('storageAccountName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), 'StorageBlobDataReader')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.ContainerRegistry/registries/{0}', variables('containerRegistryName'))]",
+      "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', variables('containerRegistryName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), 'AcrPull')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('containerRegistryName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.App/agents/{0}', parameters('agentName'))]",
+      "name": "[guid(resourceId('Microsoft.App/agents', parameters('agentName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), 'SreAgentAdministrator')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'e79298df-d852-4c6d-84f9-5d13249d1e55')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]",
+        "[resourceId('Microsoft.App/agents', parameters('agentName'))]"
       ]
     }
   ],
   "outputs": {
-    "funcAppName": {
+    "containerAppName": {
       "type": "string",
-      "value": "[variables('funcAppName')]"
+      "value": "[parameters('containerAppName')]"
     },
-    "funcAppHostname": {
+    "containerAppFqdn": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2023-12-01').defaultHostName]"
+      "value": "[reference(resourceId('Microsoft.App/containerApps', parameters('containerAppName')), '2025-01-01').configuration.ingress.fqdn]"
+    },
+    "containerAppUrl": {
+      "type": "string",
+      "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', parameters('containerAppName')), '2025-01-01').configuration.ingress.fqdn)]"
     },
     "botName": {
       "type": "string",
@@ -281,23 +437,27 @@
     },
     "botMsaAppId": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), '2023-01-31').clientId]"
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').clientId]"
     },
     "uamiId": {
       "type": "string",
-      "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName'))]"
+      "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]"
     },
     "uamiClientId": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), '2023-01-31').clientId]"
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').clientId]"
     },
     "uamiPrincipalId": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), '2023-01-31').principalId]"
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').principalId]"
     },
     "appInsightsId": {
       "type": "string",
-      "value": "[resourceId('Microsoft.Insights/components', variables('aiName'))]"
+      "value": "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]"
+    },
+    "managedEnvironmentId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppsEnvironmentName'))]"
     },
     "resourceGroupId": {
       "type": "string",
@@ -306,6 +466,22 @@
     "storageAccountName": {
       "type": "string",
       "value": "[variables('storageAccountName')]"
+    },
+    "containerRegistryName": {
+      "type": "string",
+      "value": "[variables('containerRegistryName')]"
+    },
+    "containerImage": {
+      "type": "string",
+      "value": "[variables('containerImage')]"
+    },
+    "agentResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.App/agents', parameters('agentName'))]"
+    },
+    "agentEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.App/agents', parameters('agentName')), '2026-01-01').agentEndpoint]"
     }
   }
 }

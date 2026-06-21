@@ -1,6 +1,6 @@
 {
   "validDomains": [
-    "func-sre-poc-5q7evl3h.azurewebsites.net"
+    "ca-sre-teams-bot.redrock-7c7d23f1.koreacentral.azurecontainerapps.io"
   ],
   "icons": {
     "color": "color.png",
@@ -28,7 +28,7 @@
           ]
         }
       ],
-      "botId": "a313715f-e932-42ef-ae03-a73093594b3a",
+      "botId": "51a8f861-03b0-48c3-acfa-551d88fdb1fb",
       "supportsFiles": false,
       "scopes": [
         "personal",
@@ -49,7 +49,7 @@
     "full": "Azure SRE Agent Teams Bot (POC)",
     "short": "SRE Agent Bot"
   },
-  "id": "a313715f-e932-42ef-ae03-a73093594b3a",
+  "id": "51a8f861-03b0-48c3-acfa-551d88fdb1fb",
   "description": {
     "full": "Bidirectional real-time conversation with Azure SRE Agent via Microsoft Teams.",
     "short": "Chat with Azure SRE Agent from Teams"
