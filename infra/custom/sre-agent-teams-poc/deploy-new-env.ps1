@@ -213,7 +213,7 @@ for ($attempt = 1; $attempt -le $maxDeployAttempts; $attempt++) {
     }
 
     $deployText = ($deployRaw | Out-String)
-    if ($attempt -lt $maxDeployAttempts -and $deployText -match 'MANIFEST_UNKNOWN') {
+    if ($attempt -lt $maxDeployAttempts -and $deployText -match 'MANIFEST_UNKNOWN|no such host|ContainerAppOperationError') {
         Write-Host "  ⚠ コンテナーイメージ未登録エラーを検知。自動復旧を実行します。" -ForegroundColor Yellow
         Ensure-ContainerImageTag -ResourceGroupName $ResourceGroup -ImageRepository $ContainerImageRepository -ImageTag $ContainerImageTag -BaseDir $ScriptDir
         Write-Host "  ↻ デプロイを再実行します。" -ForegroundColor Yellow
