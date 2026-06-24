@@ -99,6 +99,23 @@ try {
         throw "Bicep ファイルが見つかりません: $bicepPath"
     }
 
+    # 以前の失敗/削除で soft-delete 残存している Foundry アカウントを自動 purge する
+    $softDeletedFoundry = az cognitiveservices account list-deleted `
+        --query "[?starts_with(name, 'aif$ScenarioCode')].{name:name,location:location}" `
+        -o json 2>$null | ConvertFrom-Json
+
+    if ($softDeletedFoundry) {
+        foreach ($deletedAccount in $softDeletedFoundry) {
+            Write-Host "  → soft-delete 残存の Foundry アカウントを purge: $($deletedAccount.name)" -ForegroundColor Yellow
+            az cognitiveservices account purge `
+                --name $deletedAccount.name `
+                --resource-group $ResourceGroup `
+                --location $deletedAccount.location `
+                2>&1 | Out-Null
+            Write-Host "  ✓ purge 完了: $($deletedAccount.name)" -ForegroundColor Green
+        }
+    }
+
     # 以前の失敗で残った Cosmos DB アカウント(非成功状態)を削除して再試行可能にする
     $cosmosCandidates = az resource list `
         --resource-group $ResourceGroup `
@@ -131,9 +148,33 @@ try {
         --name 'main' `
         --template-file $bicepPath `
         --parameters scenarioCode=$ScenarioCode location=$effectiveLocation `
+        --only-show-errors `
         -o json 2>&1
 
     if ($LASTEXITCODE -ne 0) {
+        if ($deployment -match 'FlagMustBeSetForRestore') {
+            Write-Host "  → soft-delete 残存の Foundry アカウントを検出。purge して再試行します" -ForegroundColor Yellow
+
+            $restoredMatch = [regex]::Match($deployment, "resourceGroups/[^/]+/providers/Microsoft.CognitiveServices/accounts/([^']+)'")
+            if ($restoredMatch.Success) {
+                $foundryToPurge = $restoredMatch.Groups[1].Value
+                az cognitiveservices account purge `
+                    --name $foundryToPurge `
+                    --resource-group $ResourceGroup `
+                    --location $effectiveLocation `
+                    2>&1 | Out-Null
+                Write-Host "  ✓ purge 完了: $foundryToPurge" -ForegroundColor Green
+            }
+
+            $deployment = az deployment group create `
+                --resource-group $ResourceGroup `
+                --name 'main' `
+                --template-file $bicepPath `
+                --parameters scenarioCode=$ScenarioCode location=$effectiveLocation `
+                --only-show-errors `
+                -o json 2>&1
+        }
+
         if ($deployment -match 'DeploymentActive') {
             Write-Host "  → 既存の active デプロイ(main)を検出。キャンセルして再試行します" -ForegroundColor Yellow
             az deployment group cancel --resource-group $ResourceGroup --name 'main' 2>&1 | Out-Null
@@ -142,6 +183,7 @@ try {
                 --name 'main' `
                 --template-file $bicepPath `
                 --parameters scenarioCode=$ScenarioCode location=$effectiveLocation `
+                --only-show-errors `
                 -o json 2>&1
         }
 
@@ -154,6 +196,7 @@ try {
                 --name 'main' `
                 --template-file $bicepPath `
                 --parameters scenarioCode=$ScenarioCode location=$effectiveLocation `
+                --only-show-errors `
                 -o json 2>&1
         }
 

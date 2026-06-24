@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.44.1.10279",
-      "templateHash": "3207985476444136604"
+      "templateHash": "12677935952569711648"
     }
   },
   "parameters": {
@@ -279,15 +279,16 @@
     {
       "type": "Microsoft.CognitiveServices/accounts/deployments",
       "apiVersion": "2024-10-01",
-      "name": "[format('{0}/gpt-4.1-mini', variables('foundryName'))]",
+      "name": "[format('{0}/{1}', variables('foundryName'), 'gpt-4.1-mini')]",
+      "sku": {
+        "name": "GlobalStandard",
+        "capacity": 10
+      },
       "properties": {
         "model": {
           "format": "OpenAI",
           "name": "gpt-4.1-mini",
           "version": "2025-04-14"
-        },
-        "capacitySettings": {
-          "designatedCapacity": 10
         }
       },
       "dependsOn": [

@@ -331,15 +331,17 @@ resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2024-08-15' = {
 }
 
 resource foundryDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
-	name: '${foundry.name}/gpt-4.1-mini'
+	name: 'gpt-4.1-mini'
+	parent: foundry
+	sku: {
+		name: 'GlobalStandard'
+		capacity: 10
+	}
 	properties: {
 		model: {
 			format: 'OpenAI'
 			name: 'gpt-4.1-mini'
 			version: '2025-04-14'
-		}
-		capacitySettings: {
-			designatedCapacity: 10
 		}
 	}
 }
