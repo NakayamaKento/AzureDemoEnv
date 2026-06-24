@@ -51,7 +51,7 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
-resource appInsights 'Microsoft.Insights/components@2022-06-01' = {
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   name: appInsightsName
   location: location
   kind: 'web'
@@ -61,7 +61,7 @@ resource appInsights 'Microsoft.Insights/components@2022-06-01' = {
   }
 }
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-11-01' = {
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
   location: location
   sku: {
@@ -89,17 +89,17 @@ resource storageAccountDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-0
   }
 }
 
-resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-11-01' = {
+resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-05-01' = {
   parent: storageAccount
   name: 'default'
 }
 
-resource conversationTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-11-01' = {
+resource conversationTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = {
   parent: tableService
   name: 'ConversationThreadMap'
 }
 
-resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01' = {
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: containerRegistryName
   location: location
   sku: {
@@ -109,15 +109,10 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01' =
     adminUserEnabled: false
     publicNetworkAccess: 'Enabled'
     networkRuleBypassOptions: 'AzureServices'
-    policies: {
-      azureADAuthenticationAsArmPolicy: {
-        status: 'enabled'
-      }
-    }
   }
 }
 
-resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-11-02' = {
+resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2026-01-01' = {
   name: containerAppsEnvironmentName
   location: location
   properties: {
@@ -313,7 +308,7 @@ resource containerAppsEnvironmentDiagnostics 'Microsoft.Insights/diagnosticSetti
   }
 }
 
-resource botService 'Microsoft.BotService/botServices@2024-03-01' = {
+resource botService 'Microsoft.BotService/botServices@2023-09-15-preview' = {
   name: botName
   location: 'global'
   sku: {
@@ -330,7 +325,7 @@ resource botService 'Microsoft.BotService/botServices@2024-03-01' = {
   }
 }
 
-resource teamsChannel 'Microsoft.BotService/botServices/channels@2024-03-01' = {
+resource teamsChannel 'Microsoft.BotService/botServices/channels@2023-09-15-preview' = {
   parent: botService
   name: 'MsTeamsChannel'
   location: 'global'
@@ -342,7 +337,7 @@ resource teamsChannel 'Microsoft.BotService/botServices/channels@2024-03-01' = {
   }
 }
 
-resource storageTableContributor 'Microsoft.Authorization/roleAssignments@2024-07-01' = {
+resource storageTableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(storageAccount.id, managedIdentity.id, 'StorageTableDataContributor')
   scope: storageAccount
   properties: {
@@ -352,7 +347,7 @@ resource storageTableContributor 'Microsoft.Authorization/roleAssignments@2024-0
   }
 }
 
-resource storageBlobReader 'Microsoft.Authorization/roleAssignments@2024-07-01' = {
+resource storageBlobReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(storageAccount.id, managedIdentity.id, 'StorageBlobDataReader')
   scope: storageAccount
   properties: {
@@ -362,7 +357,7 @@ resource storageBlobReader 'Microsoft.Authorization/roleAssignments@2024-07-01' 
   }
 }
 
-resource sreAgentAdministrator 'Microsoft.Authorization/roleAssignments@2024-07-01' = {
+resource sreAgentAdministrator 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(sreAgent.id, managedIdentity.id, 'SreAgentAdministrator')
   scope: sreAgent
   properties: {
@@ -372,7 +367,7 @@ resource sreAgentAdministrator 'Microsoft.Authorization/roleAssignments@2024-07-
   }
 }
 
-resource acrPull 'Microsoft.Authorization/roleAssignments@2024-07-01' = {
+resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(containerRegistry.id, managedIdentity.id, 'AcrPull')
   scope: containerRegistry
   properties: {

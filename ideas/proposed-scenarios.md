@@ -10,3 +10,4 @@
 | hub-and-spoke | standard | draft | 複数サブスクリプション対応 |
 | cross-subscription-vnet-peering | standard | draft | ガバナンス併用 |
 | security-baseline | standard | draft | NSG/Firewall/RBAC |
+| copilot-studio-sre-agent-poc | adhoc | draft | Copilot Studio カスタムコネクタから Azure SRE Agent に接続し Teams で操作する単発検証 |
