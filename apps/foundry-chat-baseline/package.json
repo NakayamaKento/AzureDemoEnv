@@ -1,0 +1,17 @@
+{
+  "name": "foundry-chat-baseline-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Microsoft Foundry chat baseline sample app for AzureDemoEnv",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.5.0",
+    "express": "^4.19.2"
+  }
+}

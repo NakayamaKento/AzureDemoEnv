@@ -9,7 +9,7 @@
 - `scripts/`: 検証・補助スクリプト（今後追加）
 
 ## 運用方針
-- 既定リージョンは `southwestasia`
+- 既定リージョンは `southeastasia`
 - 最小パラメータ（`scenarioCode`, `location`）を原則とする
 - モジュール追加時は既存シナリオを見直す
 - AVM があるリソースは AVM を優先して採用する
