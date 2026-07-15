@@ -14,6 +14,16 @@ Thumbs.db
 
 # Bicep/ARM build artifacts
 **/*.json.tmp
+**/bicep/*.json
+
+# Application build and dependency artifacts
+node_modules/
+**/dist/
+*.zip
+*.tar.gz
+
+# Local Azure deployment state and plans
+.azure/
 
 # Logs
 *.log
