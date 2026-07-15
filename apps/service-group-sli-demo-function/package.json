@@ -1,0 +1,30 @@
+{
+  "name": "service-group-sli-demo-function",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Service Bus worker for the Service Group SLI demo",
+  "main": "dist/functions/processOrder.js",
+  "scripts": {
+    "build": "esbuild src/functions/processOrder.js --bundle --platform=node --target=node22 --format=cjs --outfile=dist/functions/processOrder.js --external:@azure/functions-core --external:applicationinsights-native-metrics",
+    "start": "func start",
+    "smoke": "node src/smoke.js",
+    "test": "npm run smoke"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@azure/app-configuration": "^1.8.0",
+    "@azure/cosmos": "^4.2.0",
+    "@azure/functions": "^4.7.3",
+    "@azure/identity": "^4.10.2",
+    "@azure/storage-blob": "^12.27.0",
+    "applicationinsights": "^3.5.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.10"
+  },
+  "overrides": {
+    "@opentelemetry/core": "^2.9.0"
+  }
+}
