@@ -4,7 +4,7 @@ targetScope = 'resourceGroup'
 param scenarioCode string = 'csa01'
 
 @description('主デプロイリージョン')
-param location string = 'southwestasia'
+param location string = 'southeastasia'
 
 var namePrefix = toLower('${scenarioCode}-${uniqueString(resourceGroup().id)}')
 var tags = {
