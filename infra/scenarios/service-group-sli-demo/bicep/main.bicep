@@ -380,6 +380,14 @@ resource webApp 'Microsoft.Web/sites@2024-11-01' = {
           value: '3000'
         }
         {
+          name: 'WEBSITES_CONTAINER_START_TIME_LIMIT'
+          value: '600'
+        }
+        {
+          name: 'WEBSITE_WARMUP_PATH'
+          value: '/metrics'
+        }
+        {
           name: 'WEBSITE_NODE_DEFAULT_VERSION'
           value: '~22'
         }
@@ -570,6 +578,7 @@ output workerIdentityResourceId string = workerIdentity.id
 output sliIdentityResourceId string = sliIdentity.id
 output azureMonitorWorkspaceResourceId string = azureMonitorWorkspace.id
 output azureMonitorDefaultDcrResourceId string = azureMonitorWorkspace.properties.defaultIngestionSettings.dataCollectionRuleResourceId
+output azureMonitorMetricsIngestionEndpoint string = '${azureMonitorWorkspace.properties.defaultIngestionSettings.ingestionEndpoints.metrics}/dataCollectionRules/${azureMonitorWorkspace.properties.defaultIngestionSettings.dataCollectionRuleImmutableId}/streams/Microsoft-PrometheusMetrics/api/v1/write?api-version=2023-04-24'
 output workloadNames object = {
   webApp: webApp.name
   functionApp: functionApp.name

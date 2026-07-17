@@ -2,7 +2,7 @@
 
 Azure Service Groups、Azure Monitor Health Model、Service Level Indicator (SLI) の違いと関係を、実際の Azure リソースで確認するための標準シナリオです。
 
-このシナリオでは、注文処理サービスを App Service、Azure Functions、Service Bus、Cosmos DB、Storage、App Configuration、Application Insights、Log Analytics、Azure Monitor Workspace で構成します。単一 VM ではなく、複数 Azure サービスを組み合わせた小さなサービスとして作り、Service Group で束ね、Health Model で状態を伝播させ、SLI で availability/latency の目標を観察します。
+このシナリオでは、注文処理サービスを App Service、Azure Functions、Service Bus、Cosmos DB、Storage、App Configuration、Application Insights、Log Analytics、Azure Monitor Workspace で構成します。単一 VM ではなく、複数 Azure サービスを組み合わせた小さなサービスとして作り、Service Group で束ね、Health Model で状態を伝播させ、SLI で availability の目標を観察します。
 
 ## まず押さえる違い
 
@@ -22,11 +22,14 @@ Service Group は、従来の Resource Group や Subscription をなくすもの
 
 | 要素 | 役割 | このデモでの使い方 |
 |---|---|---|
-| Service Group | サービスを構成する Azure リソースを論理的に束ねる | root `注文処理サービス` と、`エントリ/API`、`注文処理`、`データストア`、`観測基盤` の子 Service Group を作る |
+| Service Group | サービスを構成する Azure リソースを論理的に束ねる | `注文処理サービス` 1つに、システムを構成するすべてのリソースを直接所属させる |
 | Health Model | サービス内の entity と依存関係をモデル化し、signal から正常/劣化/異常を評価する | root entity から tier entity、leaf resource entity へ二、三階層で状態を伝播させる |
-| SLI | availability や latency など、サービス目標に対する指標を定義する | preview の `Microsoft.Monitor/slis` で availability と latency を分離定義する |
+| SLI | availability や latency など、サービス目標に対する指標を定義する | preview の `Microsoft.Monitor/slis` で request-based availability を定義する |
 
 SLI は Service Group の子リソースではなく、Azure Monitor の preview extension resource です。このため、本シナリオでは `sli-preview.bicep` を独立させ、Service Group scope と Azure Monitor Workspace metric source の組み合わせを検証しやすくしています。
+
+> [!IMPORTANT]
+> Azure Monitor の SLI 機能を利用するには、メトリックの参照元および SLI 評価結果の保存先となる **Azure Monitor Workspace が必要です**。Application Insights や Log Analytics Workspace だけでは、この SLI 機能のメトリック source を代替できません。本シナリオでは Prometheus メトリックを Azure Monitor Workspace に取り込んでから SLI を作成します。
 
 ## アーキテクチャ
 
@@ -41,23 +44,27 @@ flowchart TD
   Func --> AppConfig
   Web --> AppInsights[Application Insights]
   Func --> AppInsights
+  Web -->|/metrics| Prometheus[Prometheus collector\n1-minute recording rules]
+  Prometheus --> AMW[Azure Monitor Workspace]
+  AMW --> Sli[Availability SLI preview]
   AppInsights --> LogAnalytics[Log Analytics]
   LogAnalytics --> Health[Azure Monitor Health Model]
   Cosmos --> Health
   Blob --> Health
   Bus --> Health
-  Health --> Sli[SLI preview]
 
   subgraph SG[Service Groups]
     Root[注文処理サービス]
-    Api[エントリ/API]
-    Processing[注文処理]
-    Data[データストア]
-    Obs[観測基盤]
-    Root --> Api
-    Root --> Processing
-    Root --> Data
-    Root --> Obs
+    Root --> Web
+    Root --> Bus
+    Root --> Func
+    Root --> Cosmos
+    Root --> Blob
+    Root --> AppConfig
+    Root --> AppInsights
+    Root --> LogAnalytics
+    Root --> AMW
+    Root --> Prometheus
   end
 ```
 
@@ -80,7 +87,7 @@ flowchart TD
 
 ### 動作確認済み範囲を最短で再現する
 
-以下の手順で、Service Group 階層、App Service API、Service Bus、Cosmos DB、Storage、App Configuration、Application Insights、Log Analytics、Azure Monitor Workspace、Function App リソースを作成できます。現在の subscription では Health Model / SLI preview API が利用できないため、まずは両方をスキップして、動作確認済み範囲を再現します。
+以下の手順で、Service Group 階層、App Service API、Service Bus、Cosmos DB、Storage、App Configuration、Application Insights、Log Analytics、Azure Monitor Workspace、Function App リソースを作成できます。workload だけを短時間で確認する場合は、Health Model と SLI をスキップします。
 
 ```powershell
 cd infra/scenarios/service-group-sli-demo
@@ -100,6 +107,8 @@ cd infra/scenarios/service-group-sli-demo
 ./set-fault.ps1 -ScenarioCode sgsli01 -Mode none
 ```
 
+この最短手順は Prometheus collector を作成しません。Azure Monitor Workspace へ SLI 用メトリックを送信する場合は、後述の「Azure Monitor Workspace へ Prometheus メトリックを送信する」に従い、`-DeployPrometheusCollector` を指定してください。
+
 正常時は `/healthz` が `status=ok`、注文 API が HTTP 202、トラフィック生成結果が `queued=True` になります。`api` 障害モードでは `/healthz` が `status=degraded`、注文 API が HTTP 503 になります。`none` に戻すと `status=ok` に復旧します。
 
 デモ終了後は必ず削除します。
@@ -110,7 +119,7 @@ az group wait --name rg-service-group-sli-demo-sgsli01 --deleted
 ```
 
 > [!IMPORTANT]
-> Function App のリソースと Managed Identity/RBAC は作成されますが、worker コードの配置は既定では行いません。また、Health Model と SLI は Bicep 定義を含みますが、現在の検証環境では preview Resource Provider の制約によりライブ動作確認の対象外です。
+> Function App のリソースと Managed Identity/RBAC は作成されますが、worker コードの配置は既定では行いません。Health Model は preview Resource Provider の環境差があります。Availability SLI は Azure Monitor Workspace への Prometheus 取り込み後にライブ検証済みです。
 
 ### 通常のデプロイ
 
@@ -118,6 +127,8 @@ az group wait --name rg-service-group-sli-demo-sgsli01 --deleted
 cd infra/scenarios/service-group-sli-demo
 ./deploy.ps1 -ScenarioCode sgsli01 -Location southeastasia -CleanupOnFailure
 ```
+
+通常デプロイも Prometheus collector は既定で無効です。Azure Monitor SLI を利用するデモでは、初回から `-DeployPrometheusCollector` を指定し、同時に `-CleanupOnFailure` は指定しないでください。
 
 `deploy.ps1` は Foundry Chat Baseline で実績のある方式を使用します。Node.js API と Web UI をソース ZIP にまとめ、App Service の `SCM_DO_BUILD_DURING_DEPLOYMENT=true` と `ENABLE_ORYX_BUILD=true` を有効化して、Oryx に依存関係を復元させます。注文 API は App Service のユーザー割り当て Managed Identity で App Configuration、Service Bus、Cosmos DB に接続します。`-CleanupOnFailure` を付けると、途中で失敗した場合に今回の Resource Group と Service Group の削除を要求し、不要なコストが残らないようにします。
 
@@ -149,6 +160,63 @@ Health Model または SLI preview の capability check を後回しにしたい
 ./deploy.ps1 -ScenarioCode sgsli01 -Location southeastasia -SkipHealthModel
 ./deploy.ps1 -ScenarioCode sgsli01 -Location southeastasia -SkipSli
 ```
+
+### Azure Monitor Workspace へ Prometheus メトリックを送信する
+
+Azure Monitor SLI が読む source は Azure Monitor Workspace の Prometheus メトリックです。Application Insights の `customMetrics` は SLI の source にはなりません。このシナリオでは API が `/metrics` を公開し、明示指定時のみ小規模 Linux VM 上の self-managed Prometheus を追加します。collector は API を HTTPS で scrape し、user-assigned managed identity を使って既存 Azure Monitor Workspace へ remote-write します。
+
+既にデプロイ済みの環境へ追加する場合、`-CleanupOnFailure` は付けません。
+
+```powershell
+cd infra/scenarios/service-group-sli-demo
+
+./deploy.ps1 `
+  -ScenarioCode sgsli01 `
+  -Location southeastasia `
+  -SubscriptionId <subscription-id> `
+  -SkipHealthModel `
+  -DeployPrometheusCollector
+
+./run-demo-traffic.ps1 -ScenarioCode sgsli01 -Count 30 -FaultMode none -Simulate
+./run-demo-traffic.ps1 -ScenarioCode sgsli01 -Count 10 -FaultMode api -Simulate
+./validate-prometheus.ps1 -ScenarioCode sgsli01
+```
+
+取り込みと RBAC の反映には数分かかることがあります。`validate-prometheus.ps1` で次の系列が見つかれば取り込み成功です。
+
+- `orders_submitted_total`
+- `order_submit_failures_total`
+- `order_sli_good_requests_1m`
+- `order_sli_failed_requests_1m`
+- `order_submit_duration_milliseconds_count`
+- `order_submit_duration_milliseconds_bucket` の `le="750.0"` 系列は Portal の latency SLI で使用します。API の `/metrics` では `750` ですが、Azure Monitor Workspace では `750.0` に正規化されます。
+
+collector VM は inbound NSG rule を持たず、Prometheus は `127.0.0.1:9090` だけで listen します。VM には outbound 通信用の Standard Public IP が付与されます。SSH 公開鍵がない場合は `$HOME/.ssh/id_ed25519_azure_demo_env` を自動生成します。別の公開鍵を使う場合は `-CollectorSshPublicKeyPath` を指定します。
+
+> [!IMPORTANT]
+> collector は `Standard_B2als_v2` VM、Standard SSD、Public IP を追加するため、停止または削除するまで料金が発生します。デモ終了後は `cleanup.ps1` で Resource Group を削除してください。
+
+Azure Monitor Workspace への系列取り込みを確認した後、Service Group `sg-sgsli01-order-service` の **Monitoring** > **Create SLIs** で Portal の検証グラフを確認します。検証済みの Availability SLI 構成は次のとおりです。
+
+| 項目 | 設定値 |
+|---|---|
+| Name | `OrderAvailability` |
+| Type / Evaluation | `Availability` / `Request Count Based` |
+| Good A | `order_sli_good_requests_1m` / `Sum` / `Sum` / `job` |
+| Total A | `order_sli_good_requests_1m` / `Sum` / `Sum` / `job` |
+| Total B | `order_sli_failed_requests_1m` / `Sum` / `Sum` / `job` |
+| Total formula | `A+B` |
+| Source / destination | SLI 用 managed identity / 同じ Azure Monitor Workspace |
+| Baseline / Alert | `99%` / rolling `7 days` / alert off |
+
+Portal の request では Prometheus metric namespace が `customdefault` になります。`sli-preview.bicep` はこの実 payload と同じ値を使用します。Preview グラフは直近の固定時刻窓に datapoint がないと、API が成功していても `Could not find appropriate columns for Line Chart.` と表示することがあります。`validate-prometheus.ps1` で系列を確認し、トラフィック生成後の scrape と取り込みを待ってから再検証してください。
+
+SLI の共通 dimension は collector が成功・失敗の両系列へ付与する `job` です。Prometheus collector は raw counter の1分増分を `order_sli_good_requests_1m` と `order_sli_failed_requests_1m` に記録して AMW へ remote-write し、SLI はこの非累積 metric を集約します。SLI source は `job="order-api"` と `environment="service-group-sli-demo"` で filter します。アプリケーション metric 自体にも業務ラベル `operation="submit_order"` を付与します。`fault_mode` は障害注入の診断用ラベルとして source metric に残しますが、SLI dimension には指定しません。このため、SLI は fault mode ごとに分裂せず、すべての注文送信を合算して `成功数 / (成功数 + 失敗数)` を評価します。
+
+> [!NOTE]
+> SLI evaluator は preview 機能です。2026-07 の検証環境では、Prometheus counter に temporal aggregation `Increase` を直接指定すると、同一時刻の PromQL `increase(...[1m])` が非ゼロでも SLI の Good / Total が `0` になりました。このシナリオでは self-managed Prometheus collector の recording rule で1分増分を事前計算し、その非累積 metric を SLI が `Sum` する構成で回避します。
+
+SLI の destination metric は Portal では `OrderAvailability:Good`、`OrderAvailability:Total`、`OrderAvailability:Value` と表示されます。AMW の Prometheus API では、それぞれ `ns::sg-sgsli01-order-service/m::orderavailability:good`、`ns::sg-sgsli01-order-service/m::orderavailability:total`、`ns::sg-sgsli01-order-service/m::orderavailability:value` という正規化名で照会します。
 
 ## 障害注入
 
@@ -183,6 +251,15 @@ Health Model または SLI preview の capability check を後回しにしたい
 ./run-demo-traffic.ps1 -Count 30
 ```
 
+SLI の継続テストでは、30 秒ごとに正常 5 件を送り、10 サイクルごとに API 失敗 2 件を混ぜます。`MaxCycles=0` は Ctrl+C で停止するまで継続します。トラフィックは `simulate=true` とリクエスト単位の `demoFaultMode` を使用するため、Service Bus へメッセージを送らず、App Configuration のグローバル障害モードも変更しません。
+
+```powershell
+./run-sli-test-traffic.ps1
+
+# 6 サイクルだけ実行する例
+./run-sli-test-traffic.ps1 -IntervalSeconds 30 -MaxCycles 6
+```
+
 検証:
 
 ```powershell
@@ -200,6 +277,10 @@ az bicep build --file infra/scenarios/service-group-sli-demo/bicep/sli-preview.b
 az bicep build --file infra/scenarios/service-group-sli-demo/bicep/sli-rbac.bicep --stdout | Out-Null
 az bicep build --file infra/scenarios/service-group-sli-demo/bicep/sli-amw-rbac.bicep --stdout | Out-Null
 az bicep build --file infra/scenarios/service-group-sli-demo/bicep/sli-dcr-rbac.bicep --stdout | Out-Null
+az bicep build --file infra/scenarios/service-group-sli-demo/bicep/prometheus-collector.bicep --stdout | Out-Null
+az bicep build --file infra/scenarios/service-group-sli-demo/bicep/prometheus-rbac.bicep --stdout | Out-Null
+az bicep build --file infra/scenarios/service-group-sli-demo/bicep/prometheus-dcr-rbac.bicep --stdout | Out-Null
+az bicep build --file infra/scenarios/service-group-sli-demo/bicep/prometheus-members.bicep --stdout | Out-Null
 ```
 
 ## アプリ検証
@@ -224,8 +305,9 @@ npm test
 - Health Model の system-assigned managed identity には、同一 Resource Group の Log Analytics と Azure resource metrics を読み取るため `Monitoring Reader` を割り当てます。この RBAC 作成には `Microsoft.Authorization/roleAssignments/write` 権限が必要です。
 - Health Model の Service Group discovery は preview API の環境差を受けやすいため、既定では明示的な entity/relationship モデルを作成します。必要な場合は `health-model.bicep` の `enableServiceGroupDiscovery` を `true` にして discovery scope を検証します。
 - 2026-07 時点の検証では、公式 Bicep schema に `Microsoft.Monitor/accounts/healthmodels@2025-05-03-preview` が存在していても、subscription の resource provider metadata に `accounts/healthmodels` が露出せず、実 PUT が `Not Found` または空の `BadRequest` になる環境があります。この場合、`deploy.ps1` は既定で workload/app を継続デプロイし、`-StrictPreview` 指定時のみ失敗扱いにします。
-- `Microsoft.Monitor/slis` は preview であり、Azure Monitor Workspace の metric source 要件が実デプロイ時に追加で判明する可能性があります。そのため SLI は `sli-preview.bicep` に分離しています。
-- SLI には専用の user-assigned managed identity を使用します。`sli-rbac.bicep` は source/destination Azure Monitor Workspace と、その managed Resource Group にある既定 Data Collection Rule に `Monitoring Reader` / `Monitoring Metrics Publisher` を割り当てます。この subscription-scope RBAC デプロイには `Microsoft.Authorization/roleAssignments/write` 権限が必要です。
+- `Microsoft.Monitor/slis` は preview です。ライブ検証済みの Availability SLI だけを `sli-preview.bicep` に定義し、未検証の latency SLI は同じデプロイに含めていません。
+- SLI には専用の user-assigned managed identity を使用します。`sli-rbac.bicep` は source/destination Azure Monitor Workspace と、その managed Resource Group にある既定 Data Collection Rule に `Monitoring Reader` / `Monitoring Metrics Publisher` を割り当てます。DCR は workload Resource Group とは別の Azure Monitor managed Resource Group にあるため、DCR resource ID の exact scope への割り当てが必要です。この subscription-scope RBAC デプロイには `Microsoft.Authorization/roleAssignments/write` 権限が必要です。
+- RBAC 追加直後は Portal に Metrics Publisher の古いエラーが残ることがあります。SLI の ARM deployment または signal preview API が成功する場合は backend 側の権限は反映済みです。Portal を再読み込みして managed identity と storage location を再選択してください。
 
 ## AVM 適用状況
 

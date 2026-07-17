@@ -67,11 +67,7 @@ $mainDeployment = Invoke-AzCli -Arguments @(
 $mainOutputs = $mainDeployment.properties.outputs
 $normalizedScenarioCode = $ScenarioCode.ToLowerInvariant().Replace('-', '')
 $serviceGroupNames = @(
-    "sg-$normalizedScenarioCode-order-service",
-    "sg-$normalizedScenarioCode-api",
-    "sg-$normalizedScenarioCode-processing",
-    "sg-$normalizedScenarioCode-data",
-    "sg-$normalizedScenarioCode-observability"
+    "sg-$normalizedScenarioCode-order-service"
 )
 
 Assert-Value -Name 'API App Service name' -Value $mainOutputs.webAppName.value
@@ -93,7 +89,7 @@ foreach ($serviceGroupName in $serviceGroupNames) {
         '-o', 'none'
     ) | Out-Null
 }
-Write-Host "✓ Service Groups" -ForegroundColor Green
+Write-Host "✓ Service Group" -ForegroundColor Green
 
 $healthDeploymentJson = az deployment group show `
     --resource-group $ResourceGroup `

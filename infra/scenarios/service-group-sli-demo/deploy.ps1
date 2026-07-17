@@ -45,7 +45,13 @@ param(
     [switch]$SkipAppDeploy,
 
     [Parameter(Mandatory = $false)]
-    [switch]$DeployFunctionWorker
+    [switch]$DeployFunctionWorker,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$DeployPrometheusCollector,
+
+    [Parameter(Mandatory = $false)]
+    [string]$CollectorSshPublicKeyPath = (Join-Path $HOME '.ssh\id_ed25519_azure_demo_env.pub')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,6 +65,10 @@ $apiHealthTimeoutSeconds = 600
 $apiHealthPollSeconds = 15
 $appDeploymentTimeoutSeconds = 900
 $appDeploymentPollSeconds = 15
+
+if ($DeployPrometheusCollector -and $CleanupOnFailure) {
+    throw '-DeployPrometheusCollector と -CleanupOnFailure は併用できません。既存環境を保護するため、collector の増分デプロイでは -CleanupOnFailure を外してください。'
+}
 
 function Invoke-AzCli {
     param(
@@ -158,6 +168,30 @@ function New-ParameterFile {
 
     $parameterBody | ConvertTo-Json -Depth 30 | Set-Content -Path $Path -Encoding UTF8
     return $Path
+}
+
+function Get-OrCreateSshPublicKey {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PublicKeyPath
+    )
+
+    if (-not (Test-Path $PublicKeyPath)) {
+        $sshKeygen = (Get-Command ssh-keygen -ErrorAction Stop).Source
+        $privateKeyPath = $PublicKeyPath -replace '\.pub$', ''
+        New-Item -ItemType Directory -Path (Split-Path $PublicKeyPath -Parent) -Force | Out-Null
+        & $sshKeygen -q -t ed25519 -f $privateKeyPath -N '""' -C 'azure-demo-env-prometheus-collector'
+        if ($LASTEXITCODE -ne 0) {
+            throw "collector VM 用 SSH key の生成に失敗しました: $PublicKeyPath"
+        }
+    }
+
+    $publicKey = (Get-Content -Path $PublicKeyPath -Raw).Trim()
+    if ($publicKey -notmatch '^ssh-(ed25519|rsa)\s+') {
+        throw "有効な SSH public key ではありません: $PublicKeyPath"
+    }
+
+    return $publicKey
 }
 
 function Compress-App {
@@ -545,10 +579,6 @@ function New-ServiceGroupsRest {
     $normalizedScenarioCode = $ScenarioCode.ToLowerInvariant().Replace('-', '')
     $names = [ordered]@{
         root = "sg-$normalizedScenarioCode-order-service"
-        api = "sg-$normalizedScenarioCode-api"
-        processing = "sg-$normalizedScenarioCode-processing"
-        data = "sg-$normalizedScenarioCode-data"
-        observability = "sg-$normalizedScenarioCode-observability"
     }
     $ids = [ordered]@{}
     foreach ($key in $names.Keys) {
@@ -563,14 +593,6 @@ function New-ServiceGroupsRest {
 
     New-ServiceGroupRest -Name $names.root -DisplayName '注文処理サービス' -ParentResourceId $rootParentId -BodyPath (Join-Path $tempRoot 'sg-root.json')
     Wait-ServiceGroupRest -Name $names.root
-    New-ServiceGroupRest -Name $names.api -DisplayName 'エントリ/API' -ParentResourceId $ids.root -BodyPath (Join-Path $tempRoot 'sg-api.json')
-    New-ServiceGroupRest -Name $names.processing -DisplayName '注文処理' -ParentResourceId $ids.root -BodyPath (Join-Path $tempRoot 'sg-processing.json')
-    New-ServiceGroupRest -Name $names.data -DisplayName 'データストア' -ParentResourceId $ids.root -BodyPath (Join-Path $tempRoot 'sg-data.json')
-    New-ServiceGroupRest -Name $names.observability -DisplayName '観測基盤' -ParentResourceId $ids.root -BodyPath (Join-Path $tempRoot 'sg-observability.json')
-
-    foreach ($childName in @($names.api, $names.processing, $names.data, $names.observability)) {
-        Wait-ServiceGroupRest -Name $childName
-    }
 
     return [pscustomobject]@{
         properties = [pscustomobject]@{
@@ -611,11 +633,13 @@ try {
     Write-Host "`n[2/8] Provider registration" -ForegroundColor Yellow
     $providers = @(
         'Microsoft.AppConfiguration',
+        'Microsoft.Compute',
         'Microsoft.DocumentDB',
         'Microsoft.Insights',
         'Microsoft.ManagedIdentity',
         'Microsoft.Management',
         'Microsoft.Monitor',
+        'Microsoft.Network',
         'Microsoft.OperationalInsights',
         'Microsoft.Relationships',
         'Microsoft.ServiceBus',
@@ -660,6 +684,63 @@ try {
     Write-Host "  ✓ Function App: $($mainOutputs.functionAppName.value)" -ForegroundColor Green
 
     Write-Host "`n[6/8] Service Group membership / Health Model / SLI" -ForegroundColor Yellow
+    $collectorOutputs = $null
+    if ($DeployPrometheusCollector) {
+        $collectorPublicKey = Get-OrCreateSshPublicKey -PublicKeyPath $CollectorSshPublicKeyPath
+        $collectorParams = New-ParameterFile -Path (Join-Path $tempRoot 'prometheus-collector.parameters.json') -Parameters @{
+            scenarioCode = $ScenarioCode
+            location = $Location
+            apiHostName = ([System.Uri]$mainOutputs.webAppUrl.value).Host
+            metricsIngestionEndpoint = $mainOutputs.azureMonitorMetricsIngestionEndpoint.value
+            adminSshPublicKey = $collectorPublicKey
+        }
+        Write-Host "  -> validate Prometheus collector deployment with what-if" -ForegroundColor Gray
+        Invoke-AzCli -Arguments @(
+            'deployment', 'group', 'what-if',
+            '--resource-group', $ResourceGroup,
+            '--template-file', (Join-Path $bicepRoot 'prometheus-collector.bicep'),
+            '--parameters', "@$collectorParams",
+            '--only-show-errors',
+            '-o', 'none'
+        ) | Out-Null
+        $collectorDeployment = Invoke-AzCli -Arguments @(
+            'deployment', 'group', 'create',
+            '--resource-group', $ResourceGroup,
+            '--name', "sgsli-prometheus-$ScenarioCode",
+            '--template-file', (Join-Path $bicepRoot 'prometheus-collector.bicep'),
+            '--parameters', "@$collectorParams",
+            '--only-show-errors',
+            '-o', 'json'
+        ) -AsJson
+        $collectorOutputs = $collectorDeployment.properties.outputs
+        Write-Host "  ✓ Prometheus collector VM: $($collectorOutputs.collectorVmName.value)" -ForegroundColor Green
+
+        $collectorRbacParams = New-ParameterFile -Path (Join-Path $tempRoot 'prometheus-rbac.parameters.json') -Parameters @{
+            collectorIdentityPrincipalId = $collectorOutputs.collectorIdentityPrincipalId.value
+            defaultDataCollectionRuleResourceId = $mainOutputs.azureMonitorDefaultDcrResourceId.value
+        }
+        Invoke-AzCli -Arguments @(
+            'deployment', 'sub', 'create',
+            '--location', $Location,
+            '--name', "sgsli-prometheus-rbac-$ScenarioCode",
+            '--template-file', (Join-Path $bicepRoot 'prometheus-rbac.bicep'),
+            '--parameters', "@$collectorRbacParams",
+            '--only-show-errors',
+            '-o', 'none'
+        ) | Out-Null
+        Write-Host "  ✓ Prometheus collector DCR RBAC deployed" -ForegroundColor Green
+    } else {
+        Write-Host "  - Prometheus collector deployment skipped (use -DeployPrometheusCollector to opt in)." -ForegroundColor Yellow
+        $existingCollectorDeployment = az deployment group show `
+            --resource-group $ResourceGroup `
+            --name "sgsli-prometheus-$ScenarioCode" `
+            -o json 2>$null
+        if ($LASTEXITCODE -eq 0 -and $existingCollectorDeployment) {
+            $collectorOutputs = ($existingCollectorDeployment | ConvertFrom-Json).properties.outputs
+            Write-Host "  ✓ Existing Prometheus collector detected for Service Group membership" -ForegroundColor Green
+        }
+    }
+
     $memberParams = New-ParameterFile -Path (Join-Path $tempRoot 'members.parameters.json') -Parameters @{
         serviceGroupIds = $serviceGroupOutputs.serviceGroupIds.value
         workloadNames = $mainOutputs.workloadNames.value
@@ -674,6 +755,24 @@ try {
         '-o', 'none'
     ) | Out-Null
     Write-Host "  ✓ Service Group membership deployed" -ForegroundColor Green
+
+    if ($collectorOutputs) {
+        $collectorMemberParams = New-ParameterFile -Path (Join-Path $tempRoot 'prometheus-members.parameters.json') -Parameters @{
+            rootServiceGroupId = $serviceGroupOutputs.serviceGroupIds.value.root
+            collectorVmName = $collectorOutputs.collectorVmName.value
+            collectorIdentityName = $collectorOutputs.collectorIdentityName.value
+        }
+        Invoke-AzCli -Arguments @(
+            'deployment', 'group', 'create',
+            '--resource-group', $ResourceGroup,
+            '--name', "sgsli-prometheus-members-$ScenarioCode",
+            '--template-file', (Join-Path $bicepRoot 'prometheus-members.bicep'),
+            '--parameters', "@$collectorMemberParams",
+            '--only-show-errors',
+            '-o', 'none'
+        ) | Out-Null
+        Write-Host "  ✓ Prometheus collector Service Group membership deployed" -ForegroundColor Green
+    }
 
     if (-not $SkipHealthModel) {
         $healthParams = New-ParameterFile -Path (Join-Path $tempRoot 'health.parameters.json') -Parameters @{

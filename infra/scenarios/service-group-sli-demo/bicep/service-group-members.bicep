@@ -2,10 +2,6 @@ targetScope = 'resourceGroup'
 
 type ServiceGroupIds = {
   root: string
-  api: string
-  processing: string
-  data: string
-  observability: string
 }
 
 type WorkloadNames = {
@@ -72,7 +68,7 @@ resource webAppMember 'Microsoft.Relationships/serviceGroupMember@2023-09-01-pre
   name: 'sgMember'
   scope: webApp
   properties: {
-    targetId: serviceGroupIds.api
+    targetId: serviceGroupIds.root
   }
 }
 
@@ -80,7 +76,7 @@ resource functionAppMember 'Microsoft.Relationships/serviceGroupMember@2023-09-0
   name: 'sgMember'
   scope: functionApp
   properties: {
-    targetId: serviceGroupIds.processing
+    targetId: serviceGroupIds.root
   }
 }
 
@@ -88,7 +84,7 @@ resource serviceBusNamespaceMember 'Microsoft.Relationships/serviceGroupMember@2
   name: 'sgMember'
   scope: serviceBusNamespace
   properties: {
-    targetId: serviceGroupIds.processing
+    targetId: serviceGroupIds.root
   }
 }
 
@@ -96,7 +92,7 @@ resource serviceBusQueueMember 'Microsoft.Relationships/serviceGroupMember@2023-
   name: 'sgMember'
   scope: serviceBusQueue
   properties: {
-    targetId: serviceGroupIds.processing
+    targetId: serviceGroupIds.root
   }
 }
 
@@ -104,7 +100,7 @@ resource cosmosMember 'Microsoft.Relationships/serviceGroupMember@2023-09-01-pre
   name: 'sgMember'
   scope: cosmosAccount
   properties: {
-    targetId: serviceGroupIds.data
+    targetId: serviceGroupIds.root
   }
 }
 
@@ -112,7 +108,7 @@ resource storageMember 'Microsoft.Relationships/serviceGroupMember@2023-09-01-pr
   name: 'sgMember'
   scope: storageAccount
   properties: {
-    targetId: serviceGroupIds.data
+    targetId: serviceGroupIds.root
   }
 }
 
@@ -120,7 +116,7 @@ resource appConfigurationMember 'Microsoft.Relationships/serviceGroupMember@2023
   name: 'sgMember'
   scope: appConfiguration
   properties: {
-    targetId: serviceGroupIds.processing
+    targetId: serviceGroupIds.root
   }
 }
 
@@ -128,7 +124,7 @@ resource appInsightsMember 'Microsoft.Relationships/serviceGroupMember@2023-09-0
   name: 'sgMember'
   scope: applicationInsights
   properties: {
-    targetId: serviceGroupIds.observability
+    targetId: serviceGroupIds.root
   }
 }
 
@@ -136,7 +132,7 @@ resource logAnalyticsMember 'Microsoft.Relationships/serviceGroupMember@2023-09-
   name: 'sgMember'
   scope: logAnalytics
   properties: {
-    targetId: serviceGroupIds.observability
+    targetId: serviceGroupIds.root
   }
 }
 
@@ -144,7 +140,7 @@ resource azureMonitorWorkspaceMember 'Microsoft.Relationships/serviceGroupMember
   name: 'sgMember'
   scope: azureMonitorWorkspace
   properties: {
-    targetId: serviceGroupIds.observability
+    targetId: serviceGroupIds.root
   }
 }
 

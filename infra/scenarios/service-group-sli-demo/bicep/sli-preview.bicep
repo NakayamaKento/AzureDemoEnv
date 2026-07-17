@@ -9,7 +9,7 @@ param azureMonitorWorkspaceName string
 @description('SLI が AMW metrics を読むために使う user-assigned managed identity resource ID。')
 param sliManagedIdentityResourceId string
 
-var metricNamespace = 'service-group-sli-demo'
+var metricNamespace = 'customdefault'
 
 resource rootServiceGroup 'Microsoft.Management/serviceGroups@2024-02-01-preview' existing = {
   scope: tenant()
@@ -22,7 +22,7 @@ resource azureMonitorWorkspace 'Microsoft.Monitor/accounts@2025-10-03' existing 
 
 resource availabilitySli 'Microsoft.Monitor/slis@2025-03-01-preview' = {
   scope: rootServiceGroup
-  name: 'AvailabilitySli'
+  name: 'OrderAvailability'
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -38,7 +38,7 @@ resource availabilitySli 'Microsoft.Monitor/slis@2025-03-01-preview' = {
       }
     }
     category: 'Availability'
-    description: 'Request-based availability for the order submission path. This preview SLI expects matching metrics to be available in the Azure Monitor Workspace.'
+    description: 'Request-based availability for the order submission path.'
     destinationAmwAccounts: [
       {
         identity: sliManagedIdentityResourceId
@@ -49,123 +49,104 @@ resource availabilitySli 'Microsoft.Monitor/slis@2025-03-01-preview' = {
     evaluationType: 'RequestBased'
     sliProperties: {
       goodSignals: {
-        signalFormula: 'ordersSubmitted'
+        signalFormula: 'A'
         signalSources: [
           {
-            filters: []
-            metricName: 'orders_submitted'
+            filters: [
+              {
+                dimensionName: 'job'
+                operator: 'eq'
+                value: 'order-api'
+              }
+              {
+                dimensionName: 'environment'
+                operator: 'eq'
+                value: 'service-group-sli-demo'
+              }
+            ]
+            metricName: 'order_sli_good_requests_1m'
             metricNamespace: metricNamespace
-            signalSourceId: 'ordersSubmitted'
+            signalSourceId: 'A'
             sourceAmwAccountManagedIdentity: sliManagedIdentityResourceId
             sourceAmwAccountResourceId: azureMonitorWorkspace.id
             spatialAggregation: {
-              dimensions: []
+              dimensions: [
+                'job'
+              ]
               type: 'Sum'
             }
             temporalAggregation: {
               type: 'Sum'
-              windowSizeMinutes: 5
+              windowSizeMinutes: 1
             }
           }
         ]
       }
       totalSignals: {
-        signalFormula: 'ordersSubmitted + orderSubmitFailures'
+        signalFormula: 'A+B'
         signalSources: [
           {
-            filters: []
-            metricName: 'orders_submitted'
+            filters: [
+              {
+                dimensionName: 'job'
+                operator: 'eq'
+                value: 'order-api'
+              }
+              {
+                dimensionName: 'environment'
+                operator: 'eq'
+                value: 'service-group-sli-demo'
+              }
+            ]
+            metricName: 'order_sli_good_requests_1m'
             metricNamespace: metricNamespace
-            signalSourceId: 'ordersSubmitted'
+            signalSourceId: 'A'
             sourceAmwAccountManagedIdentity: sliManagedIdentityResourceId
             sourceAmwAccountResourceId: azureMonitorWorkspace.id
             spatialAggregation: {
-              dimensions: []
+              dimensions: [
+                'job'
+              ]
               type: 'Sum'
             }
             temporalAggregation: {
               type: 'Sum'
-              windowSizeMinutes: 5
+              windowSizeMinutes: 1
             }
           }
           {
-            filters: []
-            metricName: 'order_submit_failures'
+            filters: [
+              {
+                dimensionName: 'job'
+                operator: 'eq'
+                value: 'order-api'
+              }
+              {
+                dimensionName: 'environment'
+                operator: 'eq'
+                value: 'service-group-sli-demo'
+              }
+            ]
+            metricName: 'order_sli_failed_requests_1m'
             metricNamespace: metricNamespace
-            signalSourceId: 'orderSubmitFailures'
+            signalSourceId: 'B'
             sourceAmwAccountManagedIdentity: sliManagedIdentityResourceId
             sourceAmwAccountResourceId: azureMonitorWorkspace.id
             spatialAggregation: {
-              dimensions: []
+              dimensions: [
+                'job'
+              ]
               type: 'Sum'
             }
             temporalAggregation: {
               type: 'Sum'
-              windowSizeMinutes: 5
+              windowSizeMinutes: 1
             }
           }
         ]
-      }
-    }
-  }
-}
-
-resource latencySli 'Microsoft.Monitor/slis@2025-03-01-preview' = {
-  scope: rootServiceGroup
-  name: 'LatencySli'
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${sliManagedIdentityResourceId}': {}
-    }
-  }
-  properties: {
-    baselineProperties: {
-      baseline: {
-        evaluationCalculationType: 'RollingDays'
-        evaluationPeriodDays: 7
-        value: 95
-      }
-    }
-    category: 'Latency'
-    description: 'Window-based latency SLI for order submission p95 latency. This preview SLI expects matching metrics to be available in the Azure Monitor Workspace.'
-    destinationAmwAccounts: [
-      {
-        identity: sliManagedIdentityResourceId
-        resourceId: azureMonitorWorkspace.id
-      }
-    ]
-    enableAlert: false
-    evaluationType: 'WindowBased'
-    sliProperties: {
-      signals: {
-        signalFormula: 'orderSubmitLatencyMs'
-        signalSources: [
-          {
-            filters: []
-            metricName: 'order_submit_latency_ms'
-            metricNamespace: metricNamespace
-            signalSourceId: 'orderSubmitLatencyMs'
-            sourceAmwAccountManagedIdentity: sliManagedIdentityResourceId
-            sourceAmwAccountResourceId: azureMonitorWorkspace.id
-            spatialAggregation: {
-              dimensions: []
-              type: 'Average'
-            }
-            temporalAggregation: {
-              type: 'Average'
-              windowSizeMinutes: 5
-            }
-          }
-        ]
-      }
-      windowUptimeCriteria: {
-        comparator: 'lte'
-        target: 750
       }
     }
   }
 }
 
 output availabilitySliName string = availabilitySli.name
-output latencySliName string = latencySli.name

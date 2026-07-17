@@ -138,6 +138,7 @@ foreach ($managedResourceGroup in $managedResourceGroups | Select-Object -Unique
 }
 
 $normalizedScenarioCode = $ScenarioCode.ToLowerInvariant().Replace('-', '')
+# 旧デプロイで作成された子 Service Group も削除し、再実行時に残骸を残さない。
 $serviceGroupNames = @(
     "sg-$normalizedScenarioCode-api",
     "sg-$normalizedScenarioCode-processing",

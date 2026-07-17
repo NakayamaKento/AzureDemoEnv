@@ -19,7 +19,14 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 3600)]
-    [int]$DelaySeconds = 1
+    [int]$DelaySeconds = 1,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('none', 'api')]
+    [string]$FaultMode,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Simulate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,7 +50,16 @@ $accepted = 0
 $failed = 0
 
 foreach ($index in 1..$Count) {
-    $body = @{ customerId = "traffic-$index" } | ConvertTo-Json
+    $requestBody = @{
+        customerId = "traffic-$index"
+    }
+    if ($PSBoundParameters.ContainsKey('FaultMode')) {
+        $requestBody.demoFaultMode = $FaultMode
+    }
+    if ($Simulate) {
+        $requestBody.simulate = $true
+    }
+    $body = $requestBody | ConvertTo-Json
     try {
         $response = Invoke-RestMethod `
             -Uri "$Endpoint/api/orders" `

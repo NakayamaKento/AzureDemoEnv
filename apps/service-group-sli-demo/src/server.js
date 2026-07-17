@@ -5,10 +5,12 @@ const { AppConfigurationClient } = require('@azure/app-configuration');
 const { CosmosClient } = require('@azure/cosmos');
 const { DefaultAzureCredential } = require('@azure/identity');
 const { ServiceBusClient } = require('@azure/service-bus');
+const { recordOrderFailure, recordOrderSuccess, renderMetrics } = require('./prometheusMetrics');
 
 const allowedFaultModes = new Set(['none', 'api', 'queue', 'worker', 'cosmos', 'storage', 'latency']);
 const tenantId = process.env.DEMO_TENANT_ID || 'contoso-retail';
 let inMemoryFaultMode = process.env.FAULT_MODE || 'none';
+let faultModeLastRefreshedAt = 0;
 let serviceBusClient;
 let cosmosClient;
 let appConfigClient;
@@ -46,22 +48,38 @@ async function getFaultMode() {
     return normalizeFaultMode(inMemoryFaultMode);
   }
 
+  const cacheDurationMs = Number(process.env.FAULT_MODE_CACHE_MS || 15000);
+  if (Date.now() - faultModeLastRefreshedAt < cacheDurationMs) {
+    return normalizeFaultMode(inMemoryFaultMode);
+  }
+
   try {
-    const setting = await client.getConfigurationSetting({ key: 'fault:mode' });
-    return normalizeFaultMode(setting.value);
+    const setting = await client.getConfigurationSetting(
+      { key: 'fault:mode' },
+      { abortSignal: AbortSignal.timeout(3000) }
+    );
+    inMemoryFaultMode = normalizeFaultMode(setting.value);
+    faultModeLastRefreshedAt = Date.now();
+    return inMemoryFaultMode;
   } catch (error) {
+    faultModeLastRefreshedAt = Date.now();
     return normalizeFaultMode(inMemoryFaultMode);
   }
 }
 
 async function setFaultMode(mode) {
   const normalizedMode = normalizeFaultMode(mode);
-  inMemoryFaultMode = normalizedMode;
 
   const client = getAppConfigurationClient();
   if (client) {
-    await client.setConfigurationSetting({ key: 'fault:mode', value: normalizedMode });
+    await client.setConfigurationSetting(
+      { key: 'fault:mode', value: normalizedMode },
+      { abortSignal: AbortSignal.timeout(3000) }
+    );
   }
+
+  inMemoryFaultMode = normalizedMode;
+  faultModeLastRefreshedAt = Date.now();
 
   return normalizedMode;
 }
@@ -221,6 +239,10 @@ function createApp() {
     });
   }));
 
+  app.get('/metrics', (_req, res) => {
+    res.type('text/plain; version=0.0.4; charset=utf-8').send(renderMetrics());
+  });
+
   app.get('/api/faults', asyncHandler(async (_req, res) => {
     const mode = await getFaultMode();
     res.status(200).json({ mode, allowedModes: Array.from(allowedFaultModes) });
@@ -242,7 +264,8 @@ function createApp() {
 
   app.post('/api/orders', asyncHandler(async (req, res) => {
     const started = Date.now();
-    const mode = await getFaultMode();
+    const requestedMode = req.body?.demoFaultMode || req.get('x-demo-fault-mode');
+    const mode = requestedMode ? normalizeFaultMode(requestedMode) : await getFaultMode();
 
     try {
       if (mode === 'api') {
@@ -253,9 +276,12 @@ function createApp() {
 
       await applyLatencyIfNeeded(mode);
       const order = createOrderPayload(req.body);
-      const queueResult = await submitOrder(order, mode);
+      const queueResult = req.body?.simulate
+        ? { queued: false, reason: 'simulated SLI traffic' }
+        : await submitOrder(order, mode);
       const latencyMs = Date.now() - started;
 
+      recordOrderSuccess(latencyMs, mode, queueResult.queued);
       trackMetric('orders_submitted', 1, { faultMode: mode, queued: String(queueResult.queued) });
       trackMetric('order_submit_latency_ms', latencyMs, { faultMode: mode });
       trackEvent('OrderSubmitted', { orderId: order.id, faultMode: mode, queued: String(queueResult.queued) });
@@ -263,6 +289,7 @@ function createApp() {
       res.status(202).json({ order, queue: queueResult, latencyMs, faultMode: mode });
     } catch (error) {
       const latencyMs = Date.now() - started;
+      recordOrderFailure(latencyMs, mode);
       trackMetric('order_submit_failures', 1, { faultMode: mode });
       trackEvent('OrderSubmitFailed', { faultMode: mode, message: error.message }, { latencyMs });
       res.status(error.statusCode || 500).json({ error: error.message, faultMode: mode, latencyMs });
@@ -296,13 +323,16 @@ function createApp() {
     const results = [];
 
     for (let index = 0; index < count; index += 1) {
+      const started = Date.now();
       const mode = await getFaultMode();
       const order = createOrderPayload({ customerId: `demo-${index + 1}` });
       try {
         await applyLatencyIfNeeded(mode);
         const queue = await submitOrder(order, mode);
+        recordOrderSuccess(Date.now() - started, mode, queue.queued);
         results.push({ id: order.id, accepted: true, queue });
       } catch (error) {
+        recordOrderFailure(Date.now() - started, mode);
         results.push({ id: order.id, accepted: false, error: error.message });
       }
     }
